@@ -1,4 +1,4 @@
-# APOS v3.2 Security Model
+# APOS v3.2 + Bridge Security Model
 
 APOS follows this operating sentence:
 
@@ -8,6 +8,13 @@ Web LLMs propose, local APOS validates, humans approve.
 
 The web LLM is never trusted as an authority.
 
+APOS does not try to eliminate failure. It makes failure traceable and recoverable.
+
+## Layer Model
+
+- Project Memory Layer stores project state, decisions, and task context.
+- AI Bridge Layer translates design output into execution-ready patch instructions.
+
 ## Trust Boundaries
 
 Trusted:
@@ -15,6 +22,8 @@ Trusted:
 - local APOS CLI
 - local APOS WebSocket server
 - human approval
+
+Design output from ChatGPT, Gemini, or Claude is treated as advisory only.
 
 Untrusted:
 
@@ -67,6 +76,27 @@ tests/
 ```
 
 Even in these areas, `propose_patch` does not write files. It only validates and stores a pending patch. `commit_patch` is required to write.
+
+## Human and Machine Isolation
+
+`specifications/architecture.md` is split into human notes and machine facts.
+
+Refresh flows may update only the machine facts block and must leave human notes untouched.
+
+## Risk Queue
+
+`risk_vector.json` follows the APOS Risk Queue contract:
+
+```json
+{
+	"protocol": "APOS Risk Queue",
+	"max_queue_limit": 5,
+	"overflow_policy": "archive_resolved_then_request_approval",
+	"active_pending_risks": []
+}
+```
+
+Unresolved risks are not deleted automatically. Moving them out of the queue requires approval.
 
 ## Forbidden Target Paths
 

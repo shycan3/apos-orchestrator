@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "task_id": "example-task-patch-and-run",
+  "task_type": "patch_and_run",
+  "created_by": "web_llm",
+  "workspace_root": "C:/Users/DO/Documents/apos-orchestrator",
+  "patches": [
+    {
+      "target": "workspace/hello.py",
+      "language": "python",
+      "content": "print('hello from task envelope')\n",
+      "intent": "update",
+      "description": "create or update demo hello script"
+    }
+  ],
+  "commands": [
+    {
+      "command": ["python", "workspace/hello.py"],
+      "description": "run demo hello script",
+      "expected_result": "prints hello message",
+      "timeout_seconds": 10
+    }
+  ],
+  "options": {
+    "enable_snapshots": false,
+    "enable_patch_dry_run": true,
+    "enable_command_policy": true,
+    "fail_on_snapshot_error": true,
+    "stop_on_first_failure": true
+  },
+  "meta": {
+    "source": "example"
+  }
+}

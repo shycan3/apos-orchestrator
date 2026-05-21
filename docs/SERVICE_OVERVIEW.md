@@ -1,10 +1,10 @@
-# APOS v3.2 Web-Local Orchestrator Service Overview
+# APOS v3.2 + Bridge Protocol Service Overview
 
 작성일: 2026-05-21
 
 ## 서비스 한 줄 정의
 
-APOS v3.2 Web-Local Orchestrator는 ChatGPT나 Gemini 같은 웹 기반 LLM의 코드 제안을 로컬 프로젝트 파일로 연결하되, 그 제안을 절대 바로 신뢰하지 않고 로컬 검증 서버와 인간 승인 단계를 통과하게 만드는 안전한 파일 기반 협업 서비스다.
+APOS v3.2 + Bridge Protocol은 ChatGPT나 Gemini 같은 웹 기반 LLM의 코드 제안을 로컬 프로젝트 파일로 연결하되, 그 제안을 절대 바로 신뢰하지 않고 로컬 검증 서버와 인간 승인 단계를 통과하게 만드는 안전한 파일 기반 협업 서비스다.
 
 짧게 말하면:
 
@@ -36,7 +36,7 @@ Local WebSocket Server가 경로/해시/문법/보호 영역 검증
 
 ## 이 서비스가 하는 일
 
-APOS v3.2는 크게 네 가지 일을 한다.
+APOS v3.2 + Bridge Protocol은 크게 네 가지 일을 한다.
 
 1. 프로젝트에 APOS 정적 구조를 만든다.
 2. 프로젝트의 관찰 가능한 기술 사실을 수집하고 Drift Report를 남긴다.
@@ -102,9 +102,10 @@ cli/apos.py
 
 - 실제 프로젝트에 APOS 기본 폴더 생성
 - `.apos/`, `.codex/`, `specifications/`, `context/`, `workspace/`, `archives/` 생성
-- `specifications/architecture.md`에 Machine Facts 블록 생성
+- `specifications/architecture.md`에 Human Notes와 Machine Facts 분리 구조 생성
 - refresh 시 보호 문서를 직접 수정하지 않고 `workspace/scratchpad.md`에 Drift Report 작성
 - Codex에게 넘길 APOS STRICT MODE 문장 출력
+- Bridge Protocol용 `.codex/APOS_INSTRUCTIONS.md` 생성
 
 주요 명령:
 
@@ -134,6 +135,7 @@ server/apos_server.py
 - 보호 영역 직접 쓰기 차단
 - 검증 통과 패치를 pending buffer에 저장
 - `commit_patch`가 들어와야 실제 파일 쓰기
+- 보호 영역 요청은 `workspace/scratchpad.md`로 리다이렉트
 
 ### Chrome Extension
 
@@ -154,6 +156,16 @@ extension/contentScript.js
 - source content의 SHA-256 계산
 - 로컬 서버로 `propose_patch` 전송
 - `validation_failed` 수신 시 최대 2회 자동 재질의 프롬프트 삽입
+
+### Bridge Layer
+
+Bridge Layer는 설계형 AI 출력과 실행형 AI 작업 명세 사이의 변환 규칙을 담는다.
+
+역할:
+
+- 설계형 출력에서 실행 가능한 patch envelope만 추출
+- 보호 영역 대상 제안은 수정 대신 scratchpad 제안으로 전환
+- 인간이 읽는 메모와 머신이 읽는 facts 블록을 분리
 
 대상 사이트:
 
@@ -458,7 +470,7 @@ CLI는 프로젝트의 기술적 사실을 관찰한다.
 
 ## 결론
 
-APOS v3.2 Web-Local Orchestrator는 웹 LLM을 로컬 프로젝트에 연결하는 자동화 도구가 아니라, 신뢰할 수 없는 웹 출력을 검증 가능한 로컬 패치 제안으로 바꾸는 안전 계층이다.
+APOS v3.2 + Bridge Protocol은 웹 LLM을 로컬 프로젝트에 연결하는 자동화 도구가 아니라, 신뢰할 수 없는 웹 출력을 검증 가능한 로컬 패치 제안으로 바꾸는 안전 계층이다.
 
 현재 구현은 다음 최소 제품 기준을 만족한다.
 

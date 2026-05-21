@@ -1,0 +1,48 @@
+"""Run APOS task envelope JSON files."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from apos_core.orchestrator import Orchestrator
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run APOS task envelope JSON")
+    parser.add_argument("task_file", help="Path to task envelope JSON file")
+    parser.add_argument("--json", action="store_true", help="Print result envelope as JSON")
+    args = parser.parse_args()
+
+    task_path = Path(args.task_file)
+    if not task_path.exists():
+        print(f"Task file not found: {task_path}")
+        return 1
+
+    envelope = json.loads(task_path.read_text(encoding="utf-8"))
+
+    workspace = envelope.get("workspace_root") or str(PROJECT_ROOT)
+    history_db_path = Path(workspace) / ".apos" / "history.sqlite3"
+
+    orch = Orchestrator(workspace_root=workspace, history_db_path=history_db_path)
+    orch.start()
+    result = orch.run_task_envelope(envelope)
+    orch.stop()
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False))
+    else:
+        print(
+            f"task_id={result.get('task_id')} status={result.get('status')} exit_code={result.get('exit_code')}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

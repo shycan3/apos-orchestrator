@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "task_id": "task-gemini-test",
+  "task_type": "patch_and_run",
+  "created_by": "web_llm",
+  "workspace_root": ".",
+  "patches": [
+    {
+      "target": "workspace/gemini_test.py",
+      "language": "python",
+      "content": "print('hello from Gemini through APOS')\n",
+      "intent": "create",
+      "description": "Create a simple Gemini APOS test script"
+    }
+  ],
+  "commands": [
+    {
+      "command": ["python", "workspace/gemini_test.py"],
+      "description": "Run the Gemini APOS test script",
+      "expected_result": "Print hello from Gemini through APOS",
+      "timeout_seconds": 10
+    }
+  ],
+  "options": {
+    "enable_snapshots": false,
+    "enable_patch_dry_run": true,
+    "enable_command_policy": true,
+    "fail_on_snapshot_error": true,
+    "stop_on_first_failure": true
+  },
+  "meta": {
+    "source": "web_gemini"
+  }
+}

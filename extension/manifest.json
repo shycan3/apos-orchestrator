@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "APOS v3.2 Web-Local Orchestrator",
+  "name": "APOS v3.2 + Bridge Protocol Web-Local Orchestrator",
   "version": "3.2.0",
   "description": "Detects APOS patch envelopes from web LLM UIs and sends them to the local APOS validation server.",
   "permissions": [],

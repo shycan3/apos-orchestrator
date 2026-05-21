@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-APOS v3.2 Pure Shell CLI.
+APOS v3.2 + Bridge Protocol Pure Shell CLI.
 
 This CLI creates the static APOS project structure, records observable
 machine facts, and writes drift reports to workspace/scratchpad.md without
@@ -298,13 +298,19 @@ APOS is a file-based collaboration layer.
 
 Core rule:
 Web LLMs propose, local APOS validates, humans approve.
+Bridge Layer converts design output into executable patch instructions.
+""",
+    project_root / ".apos" / "preference_layer.md": """# Preference Layer
+
+Record durable project preferences here.
+Keep this file focused on stable collaboration preferences, not task notes.
 """,
         project_root / ".apos" / "session_state.md": """# APOS Session State
 
 Current state is intentionally minimal.
 Update this file only through explicit human direction.
 """,
-        project_root / ".apos" / "risk_vector.json": '{\n  "risk_level": "low",\n  "active_risks": []\n}\n',
+    project_root / ".apos" / "risk_vector.json": '{\n  "protocol": "APOS Risk Queue",\n  "max_queue_limit": 5,\n  "overflow_policy": "archive_resolved_then_request_approval",\n  "active_pending_risks": []\n}\n',
         project_root / ".codex" / "APOS_INSTRUCTIONS.md": codex_prompt(),
         project_root / "specifications" / "core_direction.md": """# Core Direction
 
@@ -312,18 +318,48 @@ Describe the project objective, non-goals, and long-term direction here.
 """,
         project_root / "specifications" / "architecture.md": """# Architecture
 
-Human-authored architecture notes belong outside the Machine Facts block.
+## Human Notes
+
+Human-authored architecture notes belong here.
+
+---
 
 ## Machine Facts
 
 """ + facts_block + "\n",
+    project_root / "specifications" / "immutable_rules.md": """# Immutable Rules
+
+These rules define the non-negotiable project boundaries.
+Do not change them through automated drift handling.
+""",
+    project_root / "specifications" / "glossary.md": """# Glossary
+
+Define project-specific terms here so human and machine language stays aligned.
+""",
         project_root / "context" / "decisions.md": """# Decisions
 
 Record durable project decisions here.
 """,
+    project_root / "context" / "project_history.md": """# Project History
+
+Track major milestones, reversions, and completed transitions here.
+""",
         project_root / "workspace" / "current_tasks.md": """# Current Tasks
 
 - Define the next APOS-guided task.
+""",
+    project_root / "workspace" / "active_code.py": """# Active Code
+
+def main() -> None:
+    pass
+
+
+if __name__ == "__main__":
+    main()
+""",
+    project_root / "workspace" / "active_draft.md": """# Active Draft
+
+Use this file for in-progress human or machine drafting.
 """,
         project_root / "workspace" / "scratchpad.md": """# Scratchpad
 
@@ -460,6 +496,8 @@ def codex_prompt() -> str:
 Follow .codex/APOS_INSTRUCTIONS.md.
 Use APOS STRICT MODE.
 Read workspace/current_tasks.md and context/decisions.md first.
+Read task-relevant specifications only.
+Stop and ask before API changes, schema changes, deletions, or permanent rule changes.
 Do not modify specifications/, context/, .apos/, or .codex/ directly.
 Use workspace/scratchpad.md for protected-area proposals.
 """
@@ -470,7 +508,7 @@ def print_codex_prompt() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="APOS v3.2 Pure Shell CLI")
+    parser = argparse.ArgumentParser(description="APOS v3.2 + Bridge Protocol Pure Shell CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     apply_parser = subparsers.add_parser("apply", help="create APOS static structure")

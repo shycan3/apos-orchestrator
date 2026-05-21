@@ -1,8 +1,234 @@
-# APOS v3.2 Web-Local Orchestrator
+Running tests and demo
+---------------------
 
-APOS is a safety layer between web-based LLMs and a local project.
+Run the unit tests (requires `pytest`):
+
+```bash
+python -m pytest
+```
+
+Run the demo orchestrator script:
+
+```bash
+python cli/run_orchestrator.py
+```
+
+Print standard result envelope JSON:
+
+```bash
+python cli/run_orchestrator.py --json
+```
+
+Validate task envelope JSON without applying patches or running commands:
+
+```bash
+python cli/run_task.py examples/task_patch_and_run.json --validate-only
+python cli/run_task.py examples/task_patch_and_run.json --validate-only --json
+```
+
+Run task envelope JSON file:
+
+```bash
+python cli/run_task.py examples/task_patch_and_run.json
+python cli/run_task.py examples/task_patch_and_run.json --json
+```
+
+Unsafe mode (not recommended):
+
+```bash
+python cli/run_orchestrator.py --unsafe-disable-command-policy
+```
+
+Unsafe patch mode (not recommended):
+
+```bash
+python cli/run_orchestrator.py --unsafe-disable-patch-dry-run
+```
+
+Run demo with git snapshots enabled:
+
+```bash
+python cli/run_orchestrator.py --enable-snapshots
+```
+
+If snapshot creation fails and you still want to continue task execution:
+
+```bash
+python cli/run_orchestrator.py --enable-snapshots --continue-on-snapshot-error
+```
+
+SQLite DB location:
+
+- `cli/run_orchestrator.py` explicitly uses `workspace/.apos/history.sqlite3`.
+- If `history_db_path` is not provided, recorder defaults to `.apos_history.sqlite3` in the current working directory.
+
+Snapshot behavior:
+
+- Snapshot commit message format: `APOS snapshot before task: <task_id>`
+- By default, snapshot failure stops task execution (safe default).
+- Optional `--snapshot-auto-init-git` can initialize a git repo when none exists.
+
+Snapshot inspect/restore (safe mode):
+
+```bash
+python cli/snapshot_tools.py check-commit --commit <snapshot_commit>
+python cli/snapshot_tools.py diff --commit <snapshot_commit>
+python cli/snapshot_tools.py restore-file --commit <snapshot_commit> --path src/app.py
+```
+
+- APOS recommends file-level restore first.
+- `git reset --hard` style full rollback is intentionally not a default APOS workflow because it is destructive.
+
+Command execution policy (safe by default):
+
+- APOS does not allow all commands by default.
+- Commands are validated by allowlist/denylist policy before execution.
+- If blocked, command is not executed and the result is recorded as `policy_blocked=true`.
+
+Allowlist examples:
+
+- `python`
+- `pytest`
+- `node`
+- `npm`
+- `git status`
+- `git diff`
+
+Blocked examples:
+
+- `rm`, `del`, `rmdir`, `format`, `shutdown`, `reboot`
+- `curl`, `wget`, `Invoke-WebRequest`, `Invoke-Expression`
+- `powershell -EncodedCommand`
+- `chmod 777`, `sudo`, `runas`
+- shell injection patterns such as `&&` and `;`
+
+To run risky commands, explicitly modify the command policy or start demo with `--unsafe-disable-command-policy`.
+
+Patch dry-run policy (safe by default):
+
+- APOS does not immediately apply incoming patches.
+- APOS first runs patch dry-run validation and preview.
+- If any patch target fails policy validation, patch application is blocked.
+
+Dry-run preview includes:
+
+- target file path
+- whether file exists
+- operation type (`create`, `update`, `overwrite`, or `delete`)
+- old/new size
+- changed line summary
+- `policy_allowed` and `blocked_reason`
+
+Protected path examples (blocked by default):
+
+- `.git/`
+- `.venv/`
+- `node_modules/`
+- `__pycache__/`
+- `.pytest_cache/`
+- `.apos/history.sqlite3`
+- `*.sqlite3`
+- `.env`
+- `secrets.*`
+- `private_key.*`
+
+Allowed path examples:
+
+- `workspace/`
+- `src/`
+- `app/`
+- `cli/`
+- `apos_core/`
+- `tests/`
+- `docs/`
+- `README.md`
+
+If you disable patch dry-run with `--unsafe-disable-patch-dry-run`, APOS may apply patch content without preflight policy checks, which is risky.
+
+Result envelope (for web LLM re-analysis):
+
+- APOS normalizes each task outcome into a standard JSON result envelope.
+- Web LLM integrations should parse `status` first, then inspect `exit_code` and detailed fields.
+- Envelope includes patch/snapshot/command outputs and policy decisions.
+
+Status values:
+
+| status | meaning |
+| --- | --- |
+| `success` | command completed successfully |
+| `failed` | command ran but failed |
+| `patch_blocked` | patch dry-run/policy blocked file changes |
+| `command_blocked` | command policy blocked execution |
+| `snapshot_failed` | snapshot step failed before execution |
+| `validation_failed` | task envelope schema/field validation failed |
+| `internal_error` | unexpected orchestrator error |
+
+Negative exit code meanings:
+
+| exit_code | meaning |
+| --- | --- |
+| `-3` | command policy blocked |
+| `-4` | patch policy blocked |
+| `-5` | snapshot failed |
+| `-6` | task envelope validation failed |
+
+`status` should be treated as the primary interpretation field.
+
+Task envelope (for web LLM -> APOS input):
+
+- Web LLM should generate task envelope JSON, not free-form prose.
+- APOS validates task envelope before execution.
+- Task envelope is input; result envelope is standardized output.
+
+Task envelope required fields:
+
+- `schema_version`
+- `task_id`
+- `task_type` (`run`, `patch_and_run`, `preview_patch`, `restore_file`)
+- `created_by` (`user`, `web_llm`, `local_agent`)
+- `workspace_root`
+- `patches`
+- `commands`
+- `options`
+- `meta`
+
+Example task envelope file:
+
+- `examples/task_patch_and_run.json`
+- Example patch target and command path are both fixed to workspace/hello.py.
+- Allowed demo target: workspace/hello.py
+- Blocked root target: root hello.py
+
+Recommended web LLM roundtrip:
+
+1. Ask the web LLM to output only task envelope JSON.
+2. Save the JSON as a local file, for example `examples/current_task.json`.
+3. Validate it first:
+
+```bash
+python cli/run_task.py examples/current_task.json --validate-only --json
+```
+
+4. If validation succeeds, execute it:
+
+```bash
+python cli/run_task.py examples/current_task.json --json
+```
+
+5. Paste the result envelope JSON back into the web LLM for the next task.
+
+Checking logs/results:
+
+- Inspect the configured history DB path (for CLI demo: `workspace/.apos/history.sqlite3`) using `sqlite3` CLI or a DB browser.
+- Suggestion files are written as `.apos_suggestion_<id>.json` in the workspace root.
+
+# APOS v3.2 + Bridge Protocol Web-Local Orchestrator
+
+APOS is a file-based collaboration layer between web-based LLMs and a local project.
 
 It lets ChatGPT or Gemini propose file changes, but those changes must pass a local validation gate and wait for human sign-off before any file is written.
+
+The Bridge Protocol is the thin translation layer that turns design-oriented AI output into executable patch instructions.
 
 ```text
 Web LLM output
@@ -36,6 +262,12 @@ apos-orchestrator/
 └── README.md
 ```
 
+## Workspace Hygiene
+
+This repository does not require a `.vscode/` folder for APOS operation.
+
+I checked the current workspace and did not find a `.vscode/` directory to remove, so there was nothing to delete.
+
 ## Install
 
 ```bash
@@ -58,6 +290,8 @@ context/
 workspace/
 archives/
 ```
+
+The generated project also includes the APOS human/machine split inside `specifications/architecture.md` and the Bridge instructions inside `.codex/APOS_INSTRUCTIONS.md`.
 
 ## Run the Server
 
@@ -198,6 +432,8 @@ context/
 
 Direct writes to protected areas are blocked and redirected to `workspace/scratchpad.md` as proposals.
 
+See `docs/PROTOCOL.md` for the Bridge and patch-envelope rules, and `docs/SECURITY_MODEL.md` for the trust boundaries.
+
 Direct candidate areas:
 
 ```text
@@ -215,3 +451,7 @@ propose_patch -> validation -> pending buffer -> human sign-off -> commit_patch 
 ```
 
 See `docs/SECURITY_MODEL.md` for the full model.
+
+## Web LLM Prompting
+
+For web LLM prompting, use `docs/task_envelope_prompt.md`.

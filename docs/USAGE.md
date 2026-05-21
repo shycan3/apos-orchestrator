@@ -1,6 +1,8 @@
-# APOS v3.2 Web-Local Orchestrator Usage
+# APOS v3.2 + Bridge Protocol Usage
 
 APOS connects web LLM output to a local project through a local validation gate.
+
+The Bridge Protocol keeps design-oriented AI output separated from execution-oriented patch instructions.
 
 It does not give the web LLM direct write access. The web LLM proposes, the local server validates, and a human-approved `commit_patch` writes the file.
 
@@ -37,6 +39,8 @@ archives/
 ```
 
 If a pre-existing Machine Facts block cannot be parsed, the CLI aborts instead of guessing.
+
+The generated project also includes `specifications/architecture.md` with a Human Notes section, plus `.codex/APOS_INSTRUCTIONS.md` for Codex handoff.
 
 ## Refresh Machine Facts
 
@@ -110,7 +114,7 @@ def main():
     print("hello")
 ```
 
-The extension reads `pre code` blocks, finds `language-apos-patch`, pairs it with the immediately following code block, computes SHA-256, and sends a `propose_patch` message.
+The extension reads `pre code` blocks, finds `apos-patch`, pairs it with the immediately following code block, computes SHA-256, and sends a `propose_patch` message.
 
 If `sha256` is empty or a placeholder such as `...`, the extension fills the computed hash. If a real hash is supplied and mismatches the source block, the extension requests a correction.
 
