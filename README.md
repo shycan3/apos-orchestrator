@@ -455,3 +455,5 @@ See `docs/SECURITY_MODEL.md` for the full model.
 ## Web LLM Prompting
 
 For web LLM prompting, use `docs/task_envelope_prompt.md`.
+
+For result envelope analysis, use `docs/result_envelope_guide.md`.
