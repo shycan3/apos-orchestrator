@@ -40,9 +40,12 @@
 - 큰 변경은 관련 파일 경로를 함께 기록한다.
 
 ## GitHub 업로드 상태
-- 현재 상태: 진행 중
+- 현재 상태: 완료
+- 저장소 URL: https://github.com/shycan3/apos-orchestrator
+- 기본 브랜치: main
+- 공개 여부: PUBLIC
 - 완료 조건:
-  - 로컬 git 초기화
-  - 변경사항 커밋
-  - 원격 저장소 연결
-  - main 브랜치 push
+  - [x] 로컬 git 초기화
+  - [x] 변경사항 커밋
+  - [x] 원격 저장소 연결
+  - [x] main 브랜치 push

@@ -3,20 +3,25 @@
 최종 업데이트: 2026-05-21
 
 ## 1) 로컬 저장소 준비
-- [ ] git init
-- [ ] 기본 브랜치(main) 설정
+- [x] git init
+- [x] 기본 브랜치(main) 설정
 - [ ] .gitignore 점검
-- [ ] 초기 커밋 생성
+- [x] 초기 커밋 생성
 
 ## 2) 원격 저장소 준비
-- [ ] GitHub 원격 저장소 생성
-- [ ] remote origin 연결
-- [ ] 인증 토큰 또는 GitHub 로그인 상태 확인
+- [x] GitHub 원격 저장소 생성
+- [x] remote origin 연결
+- [x] 인증 토큰 또는 GitHub 로그인 상태 확인
 
 ## 3) 게시
-- [ ] git push -u origin main
+- [x] git push -u origin main
 - [ ] README/문서 링크 점검
-- [ ] 공개 범위(public/private) 확인
+- [x] 공개 범위(public/private) 확인
+
+## 게시 결과
+- 저장소: https://github.com/shycan3/apos-orchestrator
+- 기본 브랜치: main
+- 공개 범위: PUBLIC
 
 ## 참고
 - 이 파일은 게시 진행 상태를 빠르게 확인하기 위한 체크리스트다.
