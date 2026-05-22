@@ -194,6 +194,16 @@ PY
 
 Then run the `plan_approve` command with the printed task id.
 
+Listing Approvals
+-----------------
+
+You can list recorded approvals for a task using the CLI:
+
+```
+python -m cli.list_approvals TASK_ID --workspace /path/to/workspace
+```
+
+This prints a JSON array of approval events recorded in the workspace history DB.
 HTTP Approve Endpoint
 
 You can also run a lightweight HTTP endpoint that exposes an approve API. Start it with:

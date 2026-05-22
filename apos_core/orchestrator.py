@@ -514,6 +514,13 @@ class Orchestrator:
         except Exception:
             pass
 
+    def list_approvals(self, task_id: str):
+        """Return recorded approvals for a given task_id."""
+        try:
+            return self.recorder.get_approvals(task_id)
+        except Exception:
+            return []
+
     def _worker_loop(self):
         while not self._stop_event.is_set():
             try:
@@ -753,3 +760,4 @@ class Orchestrator:
                 history_db_path=str(self.recorder.db_path),
                 meta={"plan_parent": task_id, "plan_step_index": step_index, "approved_by": approved_by},
             )
+
