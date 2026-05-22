@@ -521,6 +521,18 @@ class Orchestrator:
         except Exception:
             return []
 
+    def approval_report(self, task_id: str, limit: int = 100):
+        """Return a concise approval report for `task_id`.
+
+        Report includes total approvals (up to `limit`), unique approvers,
+        and the most recent approval.
+        """
+        approvals = self.recorder.get_approvals(task_id, limit=limit)
+        total = len(approvals)
+        approvers = sorted({a.get("approved_by") for a in approvals if a.get("approved_by")})
+        last = approvals[-1] if approvals else None
+        return {"task_id": task_id, "count": total, "approvers": approvers, "last": last}
+
     def _worker_loop(self):
         while not self._stop_event.is_set():
             try:

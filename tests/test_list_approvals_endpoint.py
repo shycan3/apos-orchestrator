@@ -58,3 +58,26 @@ def test_list_approvals_endpoint_returns_approvals():
         arr = json.loads(resp.decode('utf-8'))
         assert isinstance(arr, list)
         assert any(a.get('approved_by') == 'tester' for a in arr)
+
+
+def test_list_approvals_endpoint_paging():
+    with tempfile.TemporaryDirectory() as tmp:
+        ws = Path(tmp) / "workspace"
+        ws.mkdir(parents=True)
+        os.environ['APOS_APPROVE_TOKEN'] = 'testtoken'
+        from apos_core.recorder import Recorder
+        db = ws / '.apos' / 'history.sqlite3'
+        rec = Recorder(db_path=db)
+        # create 5 approvals
+        for i in range(5):
+            rec.record_approval(f'a{i}', 'task-p', i, f'user{i%2}', {'i': i})
+        rec.close()
+
+        qs = 'task_id=task-p&workspace=%s&limit=2' % (ws.as_posix(),)
+        from io import BytesIO
+        environ = {'REQUEST_METHOD': 'GET', 'PATH_INFO': '/approvals', 'QUERY_STRING': qs, 'wsgi.input': BytesIO(b''), 'HTTP_X_APOS_APPROVE_TOKEN': 'testtoken', 'HTTP_HOST': '127.0.0.1'}
+        status, headers, resp = _call_app(environ)
+        assert status.startswith('200')
+        assert 'Link' in headers
+        arr = json.loads(resp.decode('utf-8'))
+        assert len(arr) == 2

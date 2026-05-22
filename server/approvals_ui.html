@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>APOS Approvals</title>
+  <style>body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f4f4f4}</style>
+</head>
+<body>
+  <h1>Approvals</h1>
+  <form id="q">
+    Task ID: <input id="task" name="task" />
+    Approver: <input id="approver" name="approver" />
+    <button>Lookup</button>
+  </form>
+  <div id="msg"></div>
+  <table id="tbl" style="display:none"><thead><tr><th>id</th><th>step</th><th>approver</th><th>timestamp</th><th>meta</th></tr></thead><tbody></tbody></table>
+  <script>
+  async function fetchApprovals(q){
+    const url = '/approvals?task_id='+encodeURIComponent(q.task)+'&approver='+encodeURIComponent(q.approver||'')
+    const resp = await fetch(url, {headers: {'X-APOS-Approve-Token': ''}})
+    if(!resp.ok){ document.getElementById('msg').textContent='Error: '+resp.status; return }
+    const data = await resp.json()
+    const tbody = document.querySelector('#tbl tbody')
+    tbody.innerHTML=''
+    for(const a of data){
+      const tr = document.createElement('tr')
+      tr.innerHTML = `<td>${a.id}</td><td>${a.step_index}</td><td>${a.approved_by}</td><td>${new Date(a.timestamp*1000).toISOString()}</td><td>${JSON.stringify(a.meta)}</td>`
+      tbody.appendChild(tr)
+    }
+    document.getElementById('tbl').style.display='table'
+  }
+  document.getElementById('q').addEventListener('submit', (e)=>{e.preventDefault(); fetchApprovals({task:document.getElementById('task').value, approver:document.getElementById('approver').value})})
+  </script>
+</body>
+</html>

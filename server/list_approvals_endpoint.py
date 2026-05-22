@@ -32,6 +32,27 @@ def _parse_qs(environ):
     return {k: v[0] for k, v in parse_qs(qs).items()}
 
 
+def _parse_time_param(val: str):
+    """Accept epoch seconds or ISO 8601 string. Return float seconds since epoch."""
+    if not val:
+        return None
+    try:
+        return float(val)
+    except Exception:
+        pass
+    # try ISO parse
+    try:
+        # handle trailing Z
+        if val.endswith('Z'):
+            val = val[:-1] + '+00:00'
+        from datetime import datetime
+
+        dt = datetime.fromisoformat(val)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
 def _auth_ok(environ, raw_body=b''):
     REQUIRED_TOKEN = os.environ.get("APOS_APPROVE_TOKEN")
     if not REQUIRED_TOKEN:
@@ -75,9 +96,9 @@ def app(environ, start_response):
         limit = params.get('limit')
         offset = params.get('offset')
 
+        start_ts = _parse_time_param(start) if start else None
+        end_ts = _parse_time_param(end) if end else None
         try:
-            start_ts = float(start) if start else None
-            end_ts = float(end) if end else None
             limit_i = int(limit) if limit else None
             offset_i = int(offset) if offset else None
         except Exception:
@@ -87,12 +108,34 @@ def app(environ, start_response):
         workspace = params.get('workspace', '.')
         try:
             orch = Orchestrator(workspace_root=workspace, history_db_path=f"{workspace}/.apos/history.sqlite3")
-            approvals = orch.recorder.get_approvals(task_id, approver=approver, start_ts=start_ts, end_ts=end_ts, limit=limit_i, offset=offset_i)
+            # support paging: if limit is provided, request one extra to detect 'next'
+            req_limit = limit_i + 1 if limit_i else None
+            approvals = orch.recorder.get_approvals(task_id, approver=approver, start_ts=start_ts, end_ts=end_ts, limit=req_limit, offset=offset_i)
+            next_link = None
+            if limit_i and approvals and len(approvals) > limit_i:
+                # there are more results
+                next_offset = (offset_i or 0) + limit_i
+                # build next URL with same params
+                base = environ.get('wsgi.url_scheme', 'http') + '://' + (environ.get('HTTP_HOST') or '127.0.0.1') + environ.get('PATH_INFO', '/approvals')
+                q = []
+                for k in ('task_id', 'approver', 'start', 'end', 'limit'):
+                    v = params.get(k)
+                    if v:
+                        q.append(f"{k}={v}")
+                q.append(f"offset={next_offset}")
+                next_url = base + '?' + '&'.join(q)
+                next_link = f"<{next_url}>; rel=\"next\""
+                # trim to requested size
+                approvals = approvals[:limit_i]
+
             try:
                 orch.stop()
             except Exception:
                 pass
-            start_response('200 OK', [('Content-Type', 'application/json')])
+            headers = [('Content-Type', 'application/json')]
+            if next_link:
+                headers.append(('Link', next_link))
+            start_response('200 OK', headers)
             return [json.dumps(approvals, ensure_ascii=False).encode('utf-8')]
         except Exception as exc:
             start_response('500 Internal Server Error', [('Content-Type', 'application/json')])
@@ -101,6 +144,17 @@ def app(environ, start_response):
     if path == '/health':
         start_response('200 OK', [('Content-Type', 'application/json')])
         return [json.dumps({'ok': True}).encode('utf-8')]
+
+    # serve simple UI
+    if path in ('/', '/approvals/ui', '/approvals.html') and method == 'GET':
+        try:
+            ui_path = Path(__file__).resolve().parent / 'approvals_ui.html'
+            html = ui_path.read_text(encoding='utf-8')
+            start_response('200 OK', [('Content-Type', 'text/html; charset=utf-8')])
+            return [html.encode('utf-8')]
+        except Exception:
+            start_response('404 Not Found', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'ui_not_found'}).encode('utf-8')]
 
     start_response('404 Not Found', [('Content-Type', 'application/json')])
     return [json.dumps({'error': 'not_found'}).encode('utf-8')]
