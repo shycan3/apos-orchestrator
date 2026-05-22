@@ -22,6 +22,8 @@ def main() -> int:
     parser.add_argument("--step", type=int, default=0, help="Zero-based step index to execute")
     parser.add_argument("--approved-by", help="Identifier of approver", default=None)
     parser.add_argument("--json", action="store_true", help="Print result envelope as JSON")
+    parser.add_argument("--quiet", action="store_true", help="Suppress console output (exit code still reflects result)")
+    parser.add_argument("--log-file", help="Append the result envelope JSON to a log file (path)")
     args = parser.parse_args()
 
     workspace = Path(args.workspace)
@@ -29,11 +31,29 @@ def main() -> int:
     orch = Orchestrator(workspace_root=str(workspace), history_db_path=history_db_path)
 
     result = orch.execute_plan_step(args.task_id, args.step, approved_by=args.approved_by)
+    # Optionally log result to file
+    if args.log_file:
+        try:
+            p = Path(args.log_file)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(result, ensure_ascii=False) + "\n")
+        except Exception as exc:
+            if not args.quiet:
+                print(f"Failed to write log file: {exc}", file=sys.stderr)
 
-    if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-    else:
-        print(f"task_id={result.get('task_id')} status={result.get('status')} exit_code={result.get('exit_code')}")
+    # Output to console unless quiet
+    if not args.quiet:
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(f"task_id={result.get('task_id')} status={result.get('status')} exit_code={result.get('exit_code')}")
+
+    # ensure recorder is closed before exit
+    try:
+        orch.stop()
+    except Exception:
+        pass
 
     return 0
 
