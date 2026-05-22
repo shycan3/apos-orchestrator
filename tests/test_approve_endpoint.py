@@ -12,6 +12,8 @@ import urllib.parse
 
 from apos_core.task_envelope import make_task_envelope
 from apos_core.orchestrator import Orchestrator
+import hmac
+import hashlib
 
 
 def _make_plan_only_envelope(workspace_root: str, task_id: str = "plan-approve-ep"):
@@ -77,14 +79,24 @@ def test_approve_endpoint_executes_step(tmp_path):
 
         # call endpoint
         url = 'http://127.0.0.1:8081/approve'
-        payload = json.dumps({
+        payload_dict = {
             'task_id': task_id,
             'workspace': str(workspace),
             'step': 0,
             'approved_by': 'tester',
             'json': True,
-        }).encode('utf-8')
-        req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json', 'X-APOS-Approve-Token': token}, method='POST')
+        }
+        payload = json.dumps(payload_dict).encode('utf-8')
+
+        # compute HMAC signature: timestamp + '.' + raw_body
+        ts = str(int(time.time()))
+        sig = hmac.new(token.encode('utf-8'), ts.encode('utf-8') + b'.' + payload, hashlib.sha256).hexdigest()
+        headers = {
+            'Content-Type': 'application/json',
+            'X-APOS-Timestamp': ts,
+            'X-APOS-Signature': sig,
+        }
+        req = urllib.request.Request(url, data=payload, headers=headers, method='POST')
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = resp.read().decode('utf-8')

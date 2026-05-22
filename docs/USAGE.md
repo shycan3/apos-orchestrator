@@ -232,6 +232,30 @@ curl -X POST http://127.0.0.1:8081/approve \
   -d '{"task_id":"plan-approve-demo","workspace":"./workspace","step":0}'
 ```
 
+Better: use a timestamped HMAC signature to avoid sending a static token in plaintext headers.
+
+Example HMAC usage (bash):
+
+```bash
+TOKEN=secret-token
+BODY='{"task_id":"plan-approve-demo","workspace":"./workspace","step":0}'
+TS=$(date +%s)
+SIG=$(python - <<PY
+import hmac,hashlib,sys
+tok=sys.argv[1].encode()
+ts=sys.argv[2].encode()
+body=sys.argv[3].encode()
+print(hmac.new(tok, ts+b'.'+body, hashlib.sha256).hexdigest())
+PY
+$TOKEN $TS "$BODY")
+
+curl -X POST http://127.0.0.1:8081/approve \
+  -H 'Content-Type: application/json' \
+  -H "X-APOS-Timestamp: $TS" \
+  -H "X-APOS-Signature: $SIG" \
+  -d "$BODY"
+```
+
 ## Failure Test
 
 Send a Python block with a syntax error:

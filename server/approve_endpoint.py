@@ -24,6 +24,9 @@ from typing import Tuple
 from pathlib import Path
 import sys
 import os
+import time
+import hmac
+import hashlib
 
 # ensure project root is on sys.path when run as script
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -32,9 +35,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from apos_core.orchestrator import Orchestrator
 
-# Optional token for simple auth: set APOS_APPROVE_TOKEN in environment to require
-# clients include header `X-APOS-Approve-Token: <token>` when calling /approve.
+# Optional token for auth: set APOS_APPROVE_TOKEN in environment to require
+# clients either present header `X-APOS-Approve-Token: <token>` OR a
+# timestamped HMAC signature using that token as the shared secret.
+# Signature scheme: HMAC_SHA256(token, timestamp + '.' + raw_body) hex
+# and include headers `X-APOS-Timestamp` and `X-APOS-Signature`.
 REQUIRED_TOKEN = os.environ.get("APOS_APPROVE_TOKEN")
+SIGNATURE_WINDOW = int(os.environ.get("APOS_APPROVE_SIGNATURE_WINDOW", "300"))
 
 
 def _read_json_from_environ(environ) -> Tuple[dict, int]:
@@ -57,16 +64,46 @@ def app(environ, start_response):
     method = environ.get('REQUEST_METHOD', 'GET')
 
     if path == '/approve' and method == 'POST':
-        # simple token check (optional)
+        # read raw body first for signature verification
+        try:
+            length = int(environ.get('CONTENT_LENGTH') or 0)
+        except Exception:
+            length = 0
+        raw_body = environ['wsgi.input'].read(length) if length else b''
+
+        # auth: if token required, accept either direct token header or HMAC signature
         if REQUIRED_TOKEN:
-            # WSGI exposes headers as HTTP_<HEADER_NAME>
-            supplied = environ.get('HTTP_X_APOS_APPROVE_TOKEN')
-            if supplied != REQUIRED_TOKEN:
+            supplied_token = environ.get('HTTP_X_APOS_APPROVE_TOKEN')
+            if supplied_token and supplied_token == REQUIRED_TOKEN:
+                auth_ok = True
+            else:
+                # check HMAC signature
+                ts = environ.get('HTTP_X_APOS_TIMESTAMP')
+                sig = environ.get('HTTP_X_APOS_SIGNATURE')
+                auth_ok = False
+                if ts and sig:
+                    try:
+                        ts_i = int(ts)
+                        now = int(time.time())
+                        if abs(now - ts_i) <= SIGNATURE_WINDOW:
+                            msg = ts.encode('utf-8') + b'.' + raw_body
+                            expected = hmac.new(REQUIRED_TOKEN.encode('utf-8'), msg, hashlib.sha256).hexdigest()
+                            if hmac.compare_digest(expected, sig):
+                                auth_ok = True
+                    except Exception:
+                        auth_ok = False
+
+            if not auth_ok:
                 start_response('401 Unauthorized', [('Content-Type', 'application/json')])
                 return [json.dumps({'error': 'unauthorized'}).encode('utf-8')]
 
-        payload, code = _read_json_from_environ(environ)
-        if code != 200:
+        # parse JSON from raw_body
+        if not raw_body:
+            start_response('400 Bad Request', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'invalid_json'}).encode('utf-8')]
+        try:
+            payload = json.loads(raw_body.decode('utf-8'))
+        except Exception:
             start_response('400 Bad Request', [('Content-Type', 'application/json')])
             return [json.dumps({'error': 'invalid_json'}).encode('utf-8')]
 
