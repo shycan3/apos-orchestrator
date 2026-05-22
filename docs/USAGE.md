@@ -149,6 +149,25 @@ If you use the extension content script directly, you can send commit requests f
 window.__APOS_V32__.commit("patch-001");
 ```
 
+## Execute a Single Plan Step (Plan Only Mode)
+
+When you have a `plan_only` task envelope and want to run a single step from the plan, use the `plan_step` CLI.
+
+This command constructs a standalone task for the selected step, applies patches synchronously (using the same patch policy checks), runs the first command in the step if present, and records a `result_envelope` to the workspace history DB.
+
+Example (run step 0 and print JSON result):
+
+```bash
+python cli/plan_step.py /path/to/plan.json --step 0 --json
+```
+
+Notes:
+
+- The CLI will validate the `plan_only` envelope before executing the step.
+- Patch validation and command policy are enforced the same way as normal tasks.
+- The command runs synchronously and writes a minimal `result_envelope` to `workspace/.apos/history.sqlite3`.
+- Use this for manual approval or debugging of individual plan steps before wiring up automated loops.
+
 ## Failure Test
 
 Send a Python block with a syntax error:

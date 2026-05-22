@@ -15,6 +15,11 @@
 - README, `docs/task_envelope_prompt.md`, `docs/APOS_PROJECT_OVERVIEW.md`에 Plan Only Mode 상태 반영
 - Plan Only Mode 전용 테스트로 검증과 결과 반환 흐름을 확인
 
+### 추가: Plan Step CLI 구현
+- `cli/plan_step.py` 추가: `plan_only`의 특정 단계만 실행하는 명령행 도구 구현
+- 단계의 패치 적용(동기) 및 첫 명령 실행 후 `result_envelope` 기록
+- 관련 테스트 `tests/test_plan_step_cli.py` 추가 및 전체 테스트 통과 확인
+
 ### 2) Search & Replace 패치 지원 구현
 - `Executor.preview_patch()`와 `Executor.apply_patch()`에 `search_and_replace` intent 추가
 - 검색 문자열이 정확히 1회 매칭될 때만 파일을 수정하도록 적용

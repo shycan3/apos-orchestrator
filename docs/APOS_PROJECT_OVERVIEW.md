@@ -834,6 +834,14 @@ max_total_chars = 12000
 
 현재는 `plan_only` task type의 기본 검증과 계획 요약 반환 경로를 구현했다.
 
+또한 **Plan Step 실행용 CLI**(`cli/plan_step.py`)를 추가하여 `meta.plan_steps` 내부의 특정 단계만 선택적으로 실행할 수 있다. 이 CLI는 선택한 단계의 패치를 동기적으로 적용하고(패치 정책 준수), 첫 명령을 실행한 뒤 `result_envelope`를 기록한다.
+
+간단 사용 예:
+
+```bash
+python cli/plan_step.py /path/to/plan.json --step 0 --json
+```
+
 예상 task type:
 
 ```json
