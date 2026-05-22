@@ -859,6 +859,27 @@ python cli/plan_step.py /path/to/plan.json --step 0 --json
 
 Plan Only Mode는 Auto Loop의 안정성을 높이는 기반 기능이다.
 
+추가 워크플로우 — 승인 기반 실행:
+
+Plan Only Mode는 수동 혹은 반자동 승인 워크플로우를 지원하도록 확장할 수 있다. 두 가지 보조 도구를 제공합니다:
+
+- `cli/plan_step.py`: 파일 기반 `plan_only` JSON에서 특정 단계를 즉시 실행(디버그용).
+- `cli/plan_approve.py`: 이미 `workspace/.apos/history.sqlite3`에 기록된 `plan_only` 작업의 `task_id`를 조회하여 특정 단계를 승인·실행(감사 기록용).
+
+일반 승인 흐름:
+
+1. 웹 LLM 또는 자동화가 `plan_only` envelope를 생성하고 워크스페이스의 history DB에 기록한다.
+2. 운영자가 계획을 검토한다(또는 자동 정책 검토).
+3. 운영자가 `plan_approve`로 특정 단계(index)를 승인하면 APOS는 해당 단계를 동기적으로 실행하고 `result_envelope`를 기록한다.
+
+예시 명령(승인 후 실행, JSON 출력):
+
+```
+python cli/plan_approve.py plan-123 --workspace /path/to/project --step 0 --approved-by alice --json
+```
+
+이 방식은 감사(audit)와 승인 이력을 남기기 좋으며, 자동 루프와 연동할 때 안전하게 단계별 진행을 제어하는 데 유용합니다.
+
 ---
 
 ## 16. 다음 핵심 개발 목표 4: Browser Auto Loop

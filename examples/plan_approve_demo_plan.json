@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "task_id": "plan-approve-demo",
+  "task_type": "plan_only",
+  "created_by": "example",
+  "workspace_root": "./workspace",
+  "patches": [],
+  "commands": [],
+  "options": {
+    "enable_snapshots": false,
+    "enable_patch_dry_run": true,
+    "enable_command_policy": true
+  },
+  "meta": {
+    "plan_goal": "Create a demo file via approved step",
+    "plan_steps": [
+      {
+        "title": "Write approve demo file",
+        "task_type": "patch_and_run",
+        "patches": [
+          {
+            "target": "workspace/approve_demo.py",
+            "language": "python",
+            "intent": "update",
+            "content": "print('approved step')\n"
+          }
+        ],
+        "commands": []
+      }
+    ]
+  }
+}

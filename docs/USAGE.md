@@ -168,6 +168,32 @@ Notes:
 - The command runs synchronously and writes a minimal `result_envelope` to `workspace/.apos/history.sqlite3`.
 - Use this for manual approval or debugging of individual plan steps before wiring up automated loops.
 
+## Approve and Execute a Recorded Plan Step
+
+If a `plan_only` envelope has been recorded to the workspace history DB (for example, by a server or by calling `orch.recorder.record_task(...)`), you can approve and execute a specific step using the `plan_approve` CLI. This looks up the recorded task by `task_id`, validates the plan, applies patches and runs the first command of the step synchronously, and records a `result_envelope` into the same history DB.
+
+Example (approve step 0 for recorded task `plan-123` in workspace `/path/to/project`):
+
+```bash
+python cli/plan_approve.py plan-123 --workspace /path/to/project --step 0 --approved-by alice --json
+```
+
+Quick way to record a plan task into history for a local demo (runs in the workspace root where `plan.json` exists):
+
+```bash
+# record the plan.json payload into the workspace history DB
+python - <<'PY'
+import json
+from apos_core.orchestrator import Orchestrator
+payload = json.load(open('examples/plan_approve_demo_plan.json','r',encoding='utf-8'))
+workspace = payload.get('workspace_root')
+orch = Orchestrator(workspace_root=workspace, history_db_path=f"{workspace}/.apos/history.sqlite3")
+orch.recorder.record_task(payload['task_id'], payload)
+print('recorded', payload['task_id'])
+PY
+
+Then run the `plan_approve` command with the printed task id.
+
 ## Failure Test
 
 Send a Python block with a syntax error:
