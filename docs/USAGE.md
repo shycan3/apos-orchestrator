@@ -194,6 +194,24 @@ PY
 
 Then run the `plan_approve` command with the printed task id.
 
+HTTP Approve Endpoint
+
+You can also run a lightweight HTTP endpoint that exposes an approve API. Start it with:
+
+```bash
+python server/approve_endpoint.py
+```
+
+Then POST JSON to `http://127.0.0.1:8081/approve` with keys: `task_id`, `workspace`, `step`, `approved_by` (optional). Example using `curl`:
+
+```bash
+curl -X POST http://127.0.0.1:8081/approve \
+  -H 'Content-Type: application/json' \
+  -d '{"task_id":"plan-approve-demo","workspace":"./workspace","step":0,"approved_by":"alice"}'
+```
+
+The endpoint returns the `result_envelope` JSON on success.
+
 ## Failure Test
 
 Send a Python block with a syntax error:
