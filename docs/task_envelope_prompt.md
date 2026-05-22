@@ -109,6 +109,7 @@ Allowed values:
 - `patch_and_run`
 - `preview_patch`
 - `restore_file`
+- `plan_only`
 
 Use:
 
@@ -116,6 +117,9 @@ Use:
 - `preview_patch` when only checking patch safety.
 - `run` when only running an allowed command.
 - `restore_file` only when explicitly asked to restore a file from a snapshot.
+- `plan_only` when you want APOS to validate a step-by-step plan without executing it.
+
+For `plan_only`, put the plan steps in `meta.plan_steps` as a non-empty list of step objects.
 
 ### `created_by`
 

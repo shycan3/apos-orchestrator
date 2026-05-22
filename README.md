@@ -474,14 +474,12 @@ https://gemini.google.com/*
 
 Current next priorities:
 
-1. Search & Replace Patch Support
-2. APOS Context Pack
-3. Plan Only Mode
-4. Browser Extension Safe Mode
-5. Browser Extension Assisted Mode
-6. Auto Review Mode
-7. Auto Loop Mode
-8. In-chat Overlay
+1. Plan Only Mode
+2. Browser Extension Safe Mode
+3. Browser Extension Assisted Mode
+4. Auto Review Mode
+5. Auto Loop Mode
+6. In-chat Overlay
 
 ### 1. Search & Replace Patch Support
 
@@ -537,19 +535,25 @@ Context Pack should include:
 
 It must inherit PatchPolicy exclusions.
 
-Status: planned.
+Status: implemented.
+
+Run:
+
+```bash
+python cli/context_pack.py --json
+```
 
 ### 3. Plan Only Mode
 
 Goal: split complex work into smaller steps before execution.
 
-Planned task type:
+Core task type:
 
 ```json
 "task_type": "plan_only"
 ```
 
-Status: planned.
+Status: implemented as validation + plan summary flow.
 
 ### 4. Browser Extension Safe Mode
 

@@ -7,9 +7,10 @@ from typing import Any, Dict
 
 TASK_SCHEMA_VERSION = "1.0"
 
-ALLOWED_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file"}
+ALLOWED_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file", "plan_only"}
 ALLOWED_CREATED_BY = {"user", "web_llm", "local_agent"}
 ALLOWED_PATCH_INTENTS = {"create", "update", "overwrite", "search_and_replace"}
+ALLOWED_PLAN_STEP_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file"}
 
 
 def default_options() -> Dict[str, Any]:
@@ -98,6 +99,28 @@ def validate_task_envelope(envelope: dict) -> Dict[str, Any]:
     if not isinstance(envelope.get("workspace_root"), str):
         errors.append("workspace_root_must_be_string")
 
+    meta = envelope.get("meta") if isinstance(envelope.get("meta"), dict) else {}
+
+    if envelope.get("task_type") == "plan_only":
+        plan_steps = meta.get("plan_steps")
+        if not isinstance(plan_steps, list) or not plan_steps:
+            errors.append("plan_only_plan_steps_must_be_non_empty_list")
+        else:
+            for i, step in enumerate(plan_steps):
+                if not isinstance(step, dict):
+                    errors.append(f"plan_step_{i}_must_be_dict")
+                    continue
+                title = step.get("title")
+                if not isinstance(title, str) or not title.strip():
+                    errors.append(f"plan_step_{i}_title_must_be_non_empty_string")
+                step_task_type = step.get("task_type")
+                if step_task_type not in ALLOWED_PLAN_STEP_TASK_TYPES:
+                    errors.append(f"plan_step_{i}_task_type_invalid")
+                if "patches" in step and not isinstance(step.get("patches"), list):
+                    errors.append(f"plan_step_{i}_patches_must_be_list")
+                if "commands" in step and not isinstance(step.get("commands"), list):
+                    errors.append(f"plan_step_{i}_commands_must_be_list")
+
     for i, patch in enumerate(envelope.get("patches", [])):
         if not isinstance(patch, dict):
             errors.append(f"patch_{i}_must_be_dict")
@@ -177,4 +200,5 @@ def envelope_to_task(normalized_envelope: dict) -> dict:
         "timeout": timeout,
         "task_type": normalized_envelope.get("task_type"),
         "meta": normalized_envelope.get("meta", {}),
+        "plan_steps": normalized_envelope.get("meta", {}).get("plan_steps", []),
     }

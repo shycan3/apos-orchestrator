@@ -15,9 +15,10 @@ from apos_core.orchestrator import Orchestrator
 
 
 SUPPORTED_SCHEMA_VERSION = "1.0"
-ALLOWED_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file"}
+ALLOWED_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file", "plan_only"}
 ALLOWED_CREATED_BY = {"user", "web_llm", "local_agent"}
 ALLOWED_PATCH_INTENTS = {"create", "update", "overwrite", "search_and_replace"}
+ALLOWED_PLAN_STEP_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file"}
 
 
 def validate_task_envelope(envelope: dict[str, Any]) -> list[str]:
@@ -66,6 +67,29 @@ def validate_task_envelope(envelope: dict[str, Any]) -> list[str]:
 
     if not isinstance(envelope.get("workspace_root"), str) or not envelope.get("workspace_root"):
         errors.append("workspace_root must be a non-empty string.")
+
+    meta = envelope.get("meta") if isinstance(envelope.get("meta"), dict) else {}
+    if envelope.get("task_type") == "plan_only":
+        plan_steps = meta.get("plan_steps")
+        if not isinstance(plan_steps, list) or not plan_steps:
+            errors.append("plan_only must include meta.plan_steps as a non-empty list.")
+        else:
+            for index, step in enumerate(plan_steps):
+                if not isinstance(step, dict):
+                    errors.append(f"meta.plan_steps[{index}] must be an object.")
+                    continue
+                title = step.get("title")
+                if not isinstance(title, str) or not title.strip():
+                    errors.append(f"meta.plan_steps[{index}].title must be a non-empty string.")
+                step_task_type = step.get("task_type")
+                if step_task_type not in ALLOWED_PLAN_STEP_TASK_TYPES:
+                    errors.append(
+                        f"meta.plan_steps[{index}].task_type must be one of {sorted(ALLOWED_PLAN_STEP_TASK_TYPES)}."
+                    )
+                if "patches" in step and not isinstance(step.get("patches"), list):
+                    errors.append(f"meta.plan_steps[{index}].patches must be a list when provided.")
+                if "commands" in step and not isinstance(step.get("commands"), list):
+                    errors.append(f"meta.plan_steps[{index}].commands must be a list when provided.")
 
     patches = envelope.get("patches")
     if not isinstance(patches, list):

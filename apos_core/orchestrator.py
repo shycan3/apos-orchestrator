@@ -114,6 +114,56 @@ class Orchestrator:
             self.fail_on_snapshot_error = bool(options.get("fail_on_snapshot_error", self.fail_on_snapshot_error))
             self.executor.command_policy = CommandPolicy() if self.enable_command_policy else AllowAllCommandPolicy()
 
+            if task_type == "plan_only":
+                task = envelope_to_task(normalized)
+                task_id = task["id"]
+                plan_meta = dict(normalized.get("meta", {}))
+                plan_steps = plan_meta.get("plan_steps", [])
+                plan_goal = plan_meta.get("plan_goal") or plan_meta.get("goal") or ""
+                started_at = utc_now_iso()
+                plan_summary = {
+                    "task_type": "plan_only",
+                    "plan_goal": plan_goal,
+                    "step_count": len(plan_steps),
+                    "plan_steps": plan_steps,
+                }
+                finished_at = utc_now_iso()
+                envelope_result = build_result_envelope(
+                    task_id=task_id,
+                    status="success",
+                    exit_code=0,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    duration_ms=0,
+                    patch_applied=False,
+                    patch_blocked=False,
+                    patch_blocked_reason="",
+                    patch_preview=None,
+                    snapshot_enabled=self.enable_snapshots,
+                    snapshot_commit=None,
+                    snapshot_error="",
+                    command=None,
+                    command_allowed=None,
+                    policy_blocked=False,
+                    blocked_reason="",
+                    stdout=json.dumps(plan_summary, ensure_ascii=False),
+                    stderr="",
+                    workspace_root=self.workspace_root,
+                    history_db_path=str(self.recorder.db_path),
+                    meta={"task_type": "plan_only", "plan": plan_summary},
+                )
+                self._task_envelopes[task_id] = envelope_result
+                self.recorder.record_result(
+                    str(uuid.uuid4()),
+                    task_id,
+                    0,
+                    json.dumps(plan_summary, ensure_ascii=False),
+                    "",
+                    {"task_type": "plan_only", "plan": plan_summary},
+                    result_envelope=envelope_result,
+                )
+                return envelope_result
+
             if task_type == "preview_patch":
                 task = envelope_to_task(normalized)
                 task_id = task["id"]

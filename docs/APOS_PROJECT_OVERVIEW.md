@@ -775,9 +775,9 @@ examples/current_task.json
 
 ---
 
-## 14. 다음 핵심 개발 목표 2: APOS Context Pack
+## 14. APOS Context Pack
 
-Search & Replace 다음으로 구현할 기능이다.
+Search & Replace와 함께 이미 구현한 핵심 기능이다.
 
 Context Pack은 웹 LLM에게 현재 로컬 프로젝트 상태를 안전하게 전달하는 요약 정보다.
 
@@ -828,9 +828,11 @@ max_total_chars = 12000
 
 ---
 
-## 15. 다음 핵심 개발 목표 3: Plan Only Mode
+## 15. 핵심 개발 목표 3: Plan Only Mode
 
 복잡한 작업을 한 번에 실행하지 않고 단계별 계획으로 나누기 위한 기능이다.
+
+현재는 `plan_only` task type의 기본 검증과 계획 요약 반환 경로를 구현했다.
 
 예상 task type:
 
