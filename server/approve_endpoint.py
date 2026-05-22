@@ -23,6 +23,7 @@ from urllib.parse import parse_qs
 from typing import Tuple
 from pathlib import Path
 import sys
+import os
 
 # ensure project root is on sys.path when run as script
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -30,6 +31,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apos_core.orchestrator import Orchestrator
+
+# Optional token for simple auth: set APOS_APPROVE_TOKEN in environment to require
+# clients include header `X-APOS-Approve-Token: <token>` when calling /approve.
+REQUIRED_TOKEN = os.environ.get("APOS_APPROVE_TOKEN")
 
 
 def _read_json_from_environ(environ) -> Tuple[dict, int]:
@@ -52,6 +57,14 @@ def app(environ, start_response):
     method = environ.get('REQUEST_METHOD', 'GET')
 
     if path == '/approve' and method == 'POST':
+        # simple token check (optional)
+        if REQUIRED_TOKEN:
+            # WSGI exposes headers as HTTP_<HEADER_NAME>
+            supplied = environ.get('HTTP_X_APOS_APPROVE_TOKEN')
+            if supplied != REQUIRED_TOKEN:
+                start_response('401 Unauthorized', [('Content-Type', 'application/json')])
+                return [json.dumps({'error': 'unauthorized'}).encode('utf-8')]
+
         payload, code = _read_json_from_environ(environ)
         if code != 200:
             start_response('400 Bad Request', [('Content-Type', 'application/json')])

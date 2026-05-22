@@ -10,6 +10,10 @@ APOS는 웹 기반 LLM, 예를 들어 ChatGPT나 Gemini가 로컬 프로젝트�
 
 이 문서는 다음 목적을 가진다.
 
+HTTP approve endpoint security:
+
+The lightweight HTTP endpoint supports an optional simple token-based authentication. If the environment variable `APOS_APPROVE_TOKEN` is set when starting `server/approve_endpoint.py`, the endpoint requires requests to include the header `X-APOS-Approve-Token: <token>`. This provides basic protection for local or network-exposed approval endpoints. For production use, place the endpoint behind a secure proxy or add stronger authentication.
+
 1. 처음 보는 사람이 APOS가 어떤 프로젝트인지 빠르게 이해할 수 있게 한다.
 2. 개발자가 APOS의 핵심 철학과 안전 기준을 놓치지 않게 한다.
 3. ChatGPT, Gemini, Codex, Claude Code 등 다른 AI에게 프로젝트 방향을 설명할 때 기준 문서로 사용한다.

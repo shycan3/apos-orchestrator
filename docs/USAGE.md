@@ -212,6 +212,26 @@ curl -X POST http://127.0.0.1:8081/approve \
 
 The endpoint returns the `result_envelope` JSON on success.
 
+Authentication (optional):
+
+To require a simple approval token, set the environment variable `APOS_APPROVE_TOKEN` before starting the server. Clients must then include the header `X-APOS-Approve-Token: <token>` in their requests.
+
+Example (start server requiring token):
+
+```bash
+export APOS_APPROVE_TOKEN=secret-token
+python server/approve_endpoint.py
+```
+
+Example `curl` with token:
+
+```bash
+curl -X POST http://127.0.0.1:8081/approve \
+  -H 'Content-Type: application/json' \
+  -H 'X-APOS-Approve-Token: secret-token' \
+  -d '{"task_id":"plan-approve-demo","workspace":"./workspace","step":0}'
+```
+
 ## Failure Test
 
 Send a Python block with a syntax error:

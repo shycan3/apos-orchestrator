@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -45,7 +46,11 @@ def _make_plan_only_envelope(workspace_root: str, task_id: str = "plan-approve-e
 def test_approve_endpoint_executes_step(tmp_path):
     # start endpoint server as subprocess
     server_py = Path('server/approve_endpoint.py')
-    proc = subprocess.Popen([sys.executable, str(server_py)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # set a token to test auth enforcement
+    token = 'test-token-123'
+    env = os.environ.copy()
+    env['APOS_APPROVE_TOKEN'] = token
+    proc = subprocess.Popen([sys.executable, str(server_py)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     try:
         # wait for server to start (poll /health)
         started = False
@@ -79,7 +84,7 @@ def test_approve_endpoint_executes_step(tmp_path):
             'approved_by': 'tester',
             'json': True,
         }).encode('utf-8')
-        req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json'}, method='POST')
+        req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json', 'X-APOS-Approve-Token': token}, method='POST')
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = resp.read().decode('utf-8')
