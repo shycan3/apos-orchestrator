@@ -158,9 +158,41 @@ class Recorder:
         )
         self._conn.commit()
 
-    def get_approvals(self, task_id: str):
+    def get_approvals(
+        self,
+        task_id: str,
+        approver: Optional[str] = None,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ):
         c = self._conn.cursor()
-        c.execute("SELECT id, task_id, step_index, approved_by, timestamp, meta FROM approvals WHERE task_id = ? ORDER BY timestamp", (task_id,))
+        # Build query with optional filters
+        query = "SELECT id, task_id, step_index, approved_by, timestamp, meta FROM approvals WHERE task_id = ?"
+        params = [task_id]
+        if approver:
+            query += " AND approved_by = ?"
+            params.append(approver)
+        if start_ts is not None:
+            query += " AND timestamp >= ?"
+            params.append(float(start_ts))
+        if end_ts is not None:
+            query += " AND timestamp <= ?"
+            params.append(float(end_ts))
+        query += " ORDER BY timestamp"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(int(limit))
+            if offset is not None:
+                query += " OFFSET ?"
+                params.append(int(offset))
+        elif offset is not None:
+            # sqlite requires LIMIT when OFFSET is used; use large LIMIT
+            query += " LIMIT -1 OFFSET ?"
+            params.append(int(offset))
+
+        c.execute(query, tuple(params))
         rows = c.fetchall()
         result = []
         for r in rows:
