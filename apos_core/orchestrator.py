@@ -564,3 +564,185 @@ class Orchestrator:
                 self._task_envelopes[task.get("id")] = envelope
             finally:
                 self._queue.task_done()
+
+    def execute_plan_step(self, task_id: str, step_index: int, approved_by: Optional[str] = None) -> dict:
+        """Execute a single step from a previously recorded plan_only task.
+
+        Fetches the task envelope from the recorder, validates it is a plan_only
+        envelope, constructs a standalone step task, applies patches and runs
+        the first command synchronously via the Executor, records and returns
+        a result envelope.
+        """
+        task_payload = self.recorder.get_task(task_id)
+        if not task_payload:
+            return {
+                "schema_version": "1.0",
+                "task_id": task_id,
+                "status": "not_found",
+                "exit_code": -2,
+                "stderr": "task_not_found",
+            }
+
+        check = validate_task_envelope(task_payload)
+        if not check.get("ok"):
+            started_at = utc_now_iso()
+            finished_at = utc_now_iso()
+            return build_result_envelope(
+                task_id=task_id,
+                status="validation_failed",
+                exit_code=-6,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_ms=0,
+                patch_applied=False,
+                patch_blocked=False,
+                patch_blocked_reason="",
+                patch_preview=None,
+                snapshot_enabled=self.enable_snapshots,
+                snapshot_commit=None,
+                snapshot_error="",
+                command=None,
+                command_allowed=None,
+                policy_blocked=False,
+                blocked_reason="",
+                stdout="",
+                stderr="task_envelope_validation_failed",
+                workspace_root=self.workspace_root,
+                history_db_path=str(self.recorder.db_path),
+                meta={"validation_errors": check.get("errors", [])},
+            )
+
+        normalized = check["normalized"]
+        if normalized.get("task_type") != "plan_only":
+            return {
+                "schema_version": "1.0",
+                "task_id": task_id,
+                "status": "invalid_task_type",
+                "exit_code": -7,
+                "stderr": "not_a_plan_only_task",
+            }
+
+        meta = normalized.get("meta", {})
+        plan_steps = meta.get("plan_steps", [])
+        if step_index < 0 or step_index >= len(plan_steps):
+            return {
+                "schema_version": "1.0",
+                "task_id": task_id,
+                "status": "invalid_step",
+                "exit_code": -8,
+                "stderr": "invalid_step_index",
+            }
+
+        step = plan_steps[step_index]
+
+        # Build a standalone task for the step
+        step_task_type = step.get("task_type")
+        step_patches = step.get("patches", [])
+        step_commands = step.get("commands", [])
+
+        # Prepare executor changes
+        executor_changes = []
+        for p in step_patches:
+            change = {
+                "path": p.get("target"),
+                "action": "modify" if p.get("intent") in {"update", "modify"} else p.get("intent") or "modify",
+                "content": p.get("content", ""),
+            }
+            if p.get("intent") == "search_and_replace":
+                change["action"] = "search_and_replace"
+                change["search"] = p.get("search")
+                change["replace"] = p.get("replace")
+            executor_changes.append(change)
+
+        started_at = utc_now_iso()
+        try:
+            patch_results = []
+            if executor_changes:
+                patch_results = self.executor.apply_patch(executor_changes)
+
+            cmd_result = None
+            if step_commands:
+                cmd = step_commands[0].get("command")
+                timeout = int(step_commands[0].get("timeout_seconds", 30))
+                cmd_result = self.executor.run_command(cmd, cwd=normalized.get("workspace_root") or self.workspace_root, timeout=timeout)
+
+            finished_at = utc_now_iso()
+
+            status = "success"
+            exit_code = 0
+            stdout = ""
+            stderr = ""
+            if cmd_result:
+                exit_code = cmd_result.get("exit_code")
+                stdout = cmd_result.get("stdout", "")
+                stderr = cmd_result.get("stderr", "")
+                if exit_code not in (0, None):
+                    status = "failed"
+
+            result_envelope = build_result_envelope(
+                task_id=f"{task_id}-step-{step_index}",
+                status=status,
+                exit_code=exit_code,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_ms=0,
+                patch_applied=bool(patch_results),
+                patch_blocked=False,
+                patch_blocked_reason="",
+                patch_preview=patch_results or None,
+                snapshot_enabled=False,
+                snapshot_commit=None,
+                snapshot_error="",
+                command=step_commands[0] if step_commands else None,
+                command_allowed=True,
+                policy_blocked=False,
+                blocked_reason="",
+                stdout=stdout,
+                stderr=stderr,
+                workspace_root=normalized.get("workspace_root") or self.workspace_root,
+                history_db_path=str(self.recorder.db_path),
+                meta={"plan_parent": task_id, "plan_step_index": step_index, "approved_by": approved_by},
+            )
+
+            # record result
+            try:
+                self.recorder.record_result(
+                    str(uuid.uuid4()),
+                    result_envelope.get("task_id"),
+                    result_envelope.get("exit_code"),
+                    result_envelope.get("stdout"),
+                    result_envelope.get("stderr"),
+                    {"task_type": step_task_type},
+                    result_envelope=result_envelope,
+                )
+            except Exception:
+                pass
+
+            return result_envelope
+
+        except Exception as exc:
+            finished_at = utc_now_iso()
+            return build_result_envelope(
+                task_id=f"{task_id}-step-{step_index}",
+                status="internal_error",
+                exit_code=-1,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_ms=0,
+                patch_applied=False,
+                patch_blocked=False,
+                patch_blocked_reason="",
+                patch_preview=None,
+                snapshot_enabled=False,
+                snapshot_commit=None,
+                snapshot_error="",
+                command=None,
+                command_allowed=None,
+                policy_blocked=False,
+                blocked_reason="",
+                stdout="",
+                stderr=str(exc),
+                workspace_root=normalized.get("workspace_root") or self.workspace_root,
+                history_db_path=str(self.recorder.db_path),
+                meta={"plan_parent": task_id, "plan_step_index": step_index, "approved_by": approved_by},
+            )

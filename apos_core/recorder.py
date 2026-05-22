@@ -143,3 +143,14 @@ class Recorder:
             self._conn.close()
         except Exception:
             pass
+
+    def get_task(self, task_id: str) -> Optional[dict]:
+        c = self._conn.cursor()
+        c.execute("SELECT payload FROM tasks WHERE id = ?", (task_id,))
+        row = c.fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return None
