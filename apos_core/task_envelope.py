@@ -9,7 +9,7 @@ TASK_SCHEMA_VERSION = "1.0"
 
 ALLOWED_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file"}
 ALLOWED_CREATED_BY = {"user", "web_llm", "local_agent"}
-ALLOWED_PATCH_INTENTS = {"create", "update", "overwrite"}
+ALLOWED_PATCH_INTENTS = {"create", "update", "overwrite", "search_and_replace"}
 
 
 def default_options() -> Dict[str, Any]:
@@ -102,12 +102,22 @@ def validate_task_envelope(envelope: dict) -> Dict[str, Any]:
         if not isinstance(patch, dict):
             errors.append(f"patch_{i}_must_be_dict")
             continue
-        if not isinstance(patch.get("target"), str):
+        target = patch.get("target")
+        if not isinstance(target, str):
             errors.append(f"patch_{i}_target_must_be_string")
-        if patch.get("intent") not in ALLOWED_PATCH_INTENTS:
+        intent = patch.get("intent")
+        if intent not in ALLOWED_PATCH_INTENTS:
             errors.append(f"patch_{i}_invalid_intent")
         if not isinstance(patch.get("content", ""), str):
             errors.append(f"patch_{i}_content_must_be_string")
+        if intent == "search_and_replace":
+            if not isinstance(target, str) or not target.strip():
+                errors.append(f"patch_{i}_target_must_be_non_empty_string")
+            search = patch.get("search")
+            if not isinstance(search, str) or not search:
+                errors.append(f"patch_{i}_search_must_be_non_empty_string")
+            if not isinstance(patch.get("replace"), str):
+                errors.append(f"patch_{i}_replace_must_be_string")
 
     for i, cmd in enumerate(envelope.get("commands", [])):
         if not isinstance(cmd, dict):
@@ -142,13 +152,19 @@ def envelope_to_task(normalized_envelope: dict) -> dict:
             action = "create"
         elif intent == "update":
             action = "modify"
-        patches.append(
-            {
-                "path": p.get("target"),
-                "action": action,
-                "content": p.get("content", ""),
-            }
-        )
+        elif intent == "search_and_replace":
+            action = "search_and_replace"
+
+        patch = {
+            "path": p.get("target"),
+            "action": action,
+            "content": p.get("content", ""),
+        }
+        if intent == "search_and_replace":
+            patch["search"] = p.get("search", "")
+            patch["replace"] = p.get("replace", "")
+
+        patches.append(patch)
 
     commands = normalized_envelope.get("commands", [])
     command = commands[0].get("command") if commands else None

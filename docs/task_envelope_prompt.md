@@ -155,9 +155,25 @@ Each patch must include:
 
 - `target`
 - `language`
-- `content`
 - `intent`
 - `description`
+
+Supported patch intents:
+
+- `create`
+- `update`
+- `overwrite`
+- `search_and_replace`
+
+`content` is required for full-file patch intents and optional for `search_and_replace`.
+
+`search_and_replace` rules:
+
+- Use it for small edits in long files.
+- `search` must match exactly once.
+- Zero matches fail.
+- Multiple matches fail.
+- Use `create`, `update`, or `overwrite` when you need to send full file content.
 
 ### `target`
 

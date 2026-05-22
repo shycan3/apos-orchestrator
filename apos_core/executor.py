@@ -91,6 +91,21 @@ class Executor:
                         "blocked_reason": preview.get("blocked_reason"),
                         "operation": preview.get("operation"),
                         "target": preview.get("target"),
+                        "search_match_count": preview.get("search_match_count"),
+                    }
+                )
+                continue
+
+            if preview.get("patch_blocked", False):
+                results.append(
+                    {
+                        "path": preview.get("target"),
+                        "status": "blocked",
+                        "patch_blocked": True,
+                        "blocked_reason": preview.get("blocked_reason"),
+                        "operation": preview.get("operation"),
+                        "target": preview.get("target"),
+                        "search_match_count": preview.get("search_match_count", 0),
                     }
                 )
                 continue
@@ -104,14 +119,15 @@ class Executor:
                 if operation == "delete":
                     if os.path.exists(target):
                         os.remove(target)
-                    results.append({"path": path, "status": "deleted", "patch_blocked": False})
+                    results.append({"path": path, "status": "deleted", "patch_blocked": False, "search_match_count": preview.get("search_match_count")})
                 else:
                     os.makedirs(os.path.dirname(target), exist_ok=True)
                     with open(target, "w", encoding="utf-8") as fh:
                         fh.write(content)
-                    results.append({"path": path, "status": "written", "patch_blocked": False})
+                    status = "search_and_replace_applied" if operation == "search_and_replace" else "written"
+                    results.append({"path": path, "status": status, "patch_blocked": False, "search_match_count": preview.get("search_match_count")})
             except Exception as exc:
-                results.append({"path": path, "status": "error", "reason": str(exc), "patch_blocked": False})
+                results.append({"path": path, "status": "error", "reason": str(exc), "patch_blocked": False, "search_match_count": preview.get("search_match_count")})
 
         return results
 
@@ -121,6 +137,8 @@ class Executor:
             original_target = change.get("path", "")
             action = change.get("action", "modify")
             content = change.get("content", "")
+            search = change.get("search", "")
+            replace = change.get("replace", "")
             check = self.patch_policy.validate_target(original_target)
 
             operation = self._resolve_operation(action, check.get("relative_target"))
@@ -136,6 +154,7 @@ class Executor:
                 "exists": False,
                 "old_size": 0,
                 "new_size": len(content.encode("utf-8")) if isinstance(content, str) else 0,
+                "search_match_count": None,
                 "line_change_count": 0,
                 "diff_summary": "",
             }
@@ -144,7 +163,9 @@ class Executor:
                 target_abs = Path(self.workspace_root) / check["relative_target"]
                 exists = target_abs.exists()
                 preview["exists"] = exists
-                if exists and target_abs.is_file():
+                if operation == "search_and_replace":
+                    preview.update(self._preview_search_and_replace(target_abs, search, replace))
+                elif exists and target_abs.is_file():
                     old_content = target_abs.read_text(encoding="utf-8", errors="ignore")
                     preview["old_size"] = len(old_content.encode("utf-8"))
                     preview["line_change_count"] = self._line_change_count(old_content, content)
@@ -158,6 +179,8 @@ class Executor:
         return previews
 
     def _resolve_operation(self, action: str, relative_target: Optional[str]) -> str:
+        if action == "search_and_replace":
+            return "search_and_replace"
         if action == "delete":
             return "delete"
         exists = False
@@ -168,6 +191,55 @@ class Executor:
         if action in {"modify", "update"}:
             return "update" if exists else "create"
         return "overwrite" if exists else "create"
+
+    def _preview_search_and_replace(self, target_abs: Path, search: object, replace: object) -> dict:
+        preview = {
+            "patch_blocked": True,
+            "blocked_reason": "",
+            "search_match_count": 0,
+            "old_size": 0,
+            "new_size": 0,
+            "line_change_count": 0,
+            "diff_summary": "",
+            "content": "",
+        }
+
+        if not isinstance(search, str) or not search:
+            preview["blocked_reason"] = "search must be a non-empty string"
+            return preview
+
+        if not isinstance(replace, str):
+            preview["blocked_reason"] = "replace must be a string"
+            return preview
+
+        if not target_abs.exists() or not target_abs.is_file():
+            preview["blocked_reason"] = "target file does not exist"
+            return preview
+
+        old_content = target_abs.read_text(encoding="utf-8", errors="ignore")
+        match_count = old_content.count(search)
+        preview["search_match_count"] = match_count
+        preview["old_size"] = len(old_content.encode("utf-8"))
+
+        if match_count == 0:
+            preview["blocked_reason"] = "search matched 0 times"
+            return preview
+
+        if match_count > 1:
+            preview["blocked_reason"] = "search matched multiple times"
+            return preview
+
+        new_content = old_content.replace(search, replace, 1)
+        preview["patch_blocked"] = False
+        preview["blocked_reason"] = ""
+        preview["content"] = new_content
+        preview["new_size"] = len(new_content.encode("utf-8"))
+        preview["line_change_count"] = self._line_change_count(old_content, new_content)
+        preview["diff_summary"] = (
+            f"search_and_replace: matches=1, old_lines={len(old_content.splitlines())}, "
+            f"new_lines={len(new_content.splitlines())}"
+        )
+        return preview
 
     def _line_change_count(self, old: str, new: str) -> int:
         old_lines = old.splitlines()

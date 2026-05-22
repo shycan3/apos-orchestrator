@@ -17,6 +17,7 @@ from apos_core.orchestrator import Orchestrator
 SUPPORTED_SCHEMA_VERSION = "1.0"
 ALLOWED_TASK_TYPES = {"run", "patch_and_run", "preview_patch", "restore_file"}
 ALLOWED_CREATED_BY = {"user", "web_llm", "local_agent"}
+ALLOWED_PATCH_INTENTS = {"create", "update", "overwrite", "search_and_replace"}
 
 
 def validate_task_envelope(envelope: dict[str, Any]) -> list[str]:
@@ -84,10 +85,18 @@ def validate_task_envelope(envelope: dict[str, Any]) -> list[str]:
                 errors.append(f"patches[{index}].content must be a string when provided.")
 
             intent = patch.get("intent")
-            if intent is not None and intent not in {"create", "update", "overwrite"}:
+            if intent is not None and intent not in ALLOWED_PATCH_INTENTS:
                 errors.append(
-                    f"patches[{index}].intent must be one of create, update, overwrite."
+                    f"patches[{index}].intent must be one of create, update, overwrite, search_and_replace."
                 )
+            if intent == "search_and_replace":
+                if not isinstance(target, str) or not target:
+                    errors.append(f"patches[{index}].target must be a non-empty string.")
+                search = patch.get("search")
+                if not isinstance(search, str) or not search:
+                    errors.append(f"patches[{index}].search must be a non-empty string.")
+                if not isinstance(patch.get("replace"), str):
+                    errors.append(f"patches[{index}].replace must be a string.")
 
     commands = envelope.get("commands")
     if not isinstance(commands, list):

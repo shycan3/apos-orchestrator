@@ -1,12 +1,20 @@
 # APOS 작업 저널
 
-최종 업데이트: 2026-05-21
+최종 업데이트: 2026-05-22
 
 ## 목적
 - 이 폴더는 APOS 오케스트레이터의 작업 이력과 다음 계획을 추적하기 위한 기록 공간이다.
 - 새로운 기여자가 봐도 지금까지 한 일과 앞으로 할 일을 바로 파악할 수 있도록 유지한다.
 
 ## 오늘 완료한 작업
+
+### 1) Search & Replace 패치 지원 구현
+- `Executor.preview_patch()`와 `Executor.apply_patch()`에 `search_and_replace` intent 추가
+- 검색 문자열이 정확히 1회 매칭될 때만 파일을 수정하도록 적용
+- 0회/다중 매칭/빈 검색어/대상 파일 없음/정책 차단 시 실제 파일 변경을 막도록 정리
+- task envelope 검증과 validate-only 경로에 `search_and_replace` 허용 규칙 추가
+- README, `docs/task_envelope_prompt.md`, `docs/APOS_PROJECT_OVERVIEW.md`에 구현 상태와 사용 예시 반영
+- 신규 테스트로 preview, apply, 차단, validate-only 흐름을 덧붙임
 
 ### 1) 워크스페이스 정리 확인
 - `.vscode/` 폴더 필요 여부를 점검했지만 현재 워크스페이스에는 존재하지 않음을 확인
@@ -46,6 +54,7 @@
 
 ## 다음 작업 예정
 - `docs/USAGE.md`와 `examples/`의 APOS v3.2 + Bridge Protocol 용어 정리
+- Search & Replace 사용 예시를 examples 쪽에도 추가할지 검토
 - Gemini DOM 기반 작성자/메시지 스코프 판별 호환성 개선
 - extension queue/sentKeys/retryCounts 메모리 관리 정책 보강
 - pending patch 목록 확인용 최소 UI 또는 API 설계안 정리

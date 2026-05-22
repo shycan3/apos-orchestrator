@@ -1398,7 +1398,7 @@ SnapshotManager
 APOS의 다음 품질 개선 장치는 다음 두 가지다.
 
 ```text
-Search & Replace Patch Support
+Search & Replace Patch Support (implemented)
 Context Pack
 ```
 
@@ -1408,5 +1408,3 @@ APOS의 다음 UX 목표는 다음이다.
 브라우저 확장 기반 자동 감지와 제한된 자동 루프
 ```
 
-```
-```
