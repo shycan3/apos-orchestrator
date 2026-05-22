@@ -60,6 +60,11 @@ def test_execute_plan_step_records_result_and_writes_file():
         content = target.read_text(encoding="utf-8")
         assert "approved step" in content
         # ensure DB connections closed before cleanup
+        # approval event should have been recorded
+        approvals = orch.recorder.get_approvals(task_id)
+        assert len(approvals) >= 1
+        assert approvals[-1]["approved_by"] == "tester"
+
         try:
             orch.stop()
         except Exception:

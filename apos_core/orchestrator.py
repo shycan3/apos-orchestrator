@@ -654,6 +654,13 @@ class Orchestrator:
                 change["replace"] = p.get("replace")
             executor_changes.append(change)
 
+        # record approval event before execution (if provided)
+        try:
+            approval_id = str(uuid.uuid4())
+            self.recorder.record_approval(approval_id, task_id, step_index, approved_by or "", {"initiated_at": utc_now_iso()})
+        except Exception:
+            pass
+
         started_at = utc_now_iso()
         try:
             patch_results = []

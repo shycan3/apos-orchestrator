@@ -65,6 +65,18 @@ class Recorder:
             )
             """
         )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS approvals (
+                id TEXT PRIMARY KEY,
+                task_id TEXT,
+                step_index INTEGER,
+                approved_by TEXT,
+                timestamp REAL,
+                meta TEXT
+            )
+            """
+        )
         # Backward-compatible migration for existing DBs
         c.execute("PRAGMA table_info(results)")
         cols = {row[1] for row in c.fetchall()}
@@ -137,6 +149,27 @@ class Recorder:
         c.execute("INSERT OR REPLACE INTO suggestions (id, task_id, timestamp, suggestion) VALUES (?, ?, ?, ?)",
                   (sug_id, task_id, time.time(), suggestion))
         self._conn.commit()
+
+    def record_approval(self, approval_id: str, task_id: str, step_index: int, approved_by: str, meta: Optional[dict] = None):
+        c = self._conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO approvals (id, task_id, step_index, approved_by, timestamp, meta) VALUES (?, ?, ?, ?, ?, ?)",
+            (approval_id, task_id, step_index, approved_by, time.time(), json.dumps(meta or {})),
+        )
+        self._conn.commit()
+
+    def get_approvals(self, task_id: str):
+        c = self._conn.cursor()
+        c.execute("SELECT id, task_id, step_index, approved_by, timestamp, meta FROM approvals WHERE task_id = ? ORDER BY timestamp", (task_id,))
+        rows = c.fetchall()
+        result = []
+        for r in rows:
+            try:
+                meta = json.loads(r[5]) if r[5] else {}
+            except Exception:
+                meta = {}
+            result.append({"id": r[0], "task_id": r[1], "step_index": r[2], "approved_by": r[3], "timestamp": r[4], "meta": meta})
+        return result
 
     def close(self):
         try:
