@@ -457,3 +457,422 @@ See `docs/SECURITY_MODEL.md` for the full model.
 For web LLM prompting, use `docs/task_envelope_prompt.md`.
 
 For result envelope analysis, use `docs/result_envelope_guide.md`.
+
+## APOS Roadmap
+
+Current MVP status:
+
+- Task envelope validation works.
+- Patch dry-run works.
+- Safe path policy works.
+- Command policy works.
+- Local file creation/update works.
+- Command execution works.
+- Result envelope output works.
+- Manual Web LLM → APOS → Web LLM loop has been verified.
+
+Next development priorities:
+
+1. Search & Replace Patch Support
+2. APOS Context Pack
+3. Plan Only Mode
+4. Browser Extension Safe Mode
+5. Browser Extension Assisted Mode
+6. Auto Review Mode
+7. Auto Loop Mode
+8. In-chat Overlay
+
+### 1. Search & Replace Patch Support
+
+Goal:
+
+Reduce token usage and JSON breakage when modifying long files.
+
+Current patch mode usually sends full file content through `content`.
+
+This works for small files, but becomes inefficient for large files.
+
+Planned patch shape:
+
+```json
+{
+  "target": "workspace/example.py",
+  "language": "python",
+  "intent": "search_and_replace",
+  "search": "old code block",
+  "replace": "new code block",
+  "description": "Replace one specific block"
+}
+````
+
+Safety rules:
+
+* `search` must match exactly once.
+* If `search` matches zero times, the patch must fail.
+* If `search` matches multiple times, the patch must fail.
+* APOS must preview the replacement before applying it.
+* PatchPolicy still applies to the target path.
+
+Status:
+
+```text
+Planned. Not implemented yet.
+```
+
+### 2. APOS Context Pack
+
+Goal:
+
+Give the web LLM a compact, safe summary of the local workspace.
+
+Context Pack should include:
+
+* allowed working areas
+* excluded protected areas
+* current important files
+* recent task/result summaries
+* safety reminders
+
+Context Pack must not dump the whole project.
+
+It must inherit PatchPolicy exclusions.
+
+Excluded examples:
+
+* `.git/`
+* `.venv/`
+* `node_modules/`
+* `.apos/`
+* `*.sqlite3`
+* `.env`
+* `secrets.*`
+* `private_key.*`
+
+Status:
+
+```text
+Planned.
+```
+
+### 3. Plan Only Mode
+
+Goal:
+
+Split complex work into safer smaller steps.
+
+Planned task type:
+
+```json
+"task_type": "plan_only"
+```
+
+This allows the web LLM to first output a plan instead of immediately producing a large patch.
+
+Status:
+
+```text
+Planned.
+```
+
+### 4. Browser Extension Safe Mode
+
+Goal:
+
+Detect APOS task envelope JSON directly inside ChatGPT/Gemini and send it to the local APOS server.
+
+Safe Mode behavior:
+
+* Detect task envelope automatically.
+* Validate automatically.
+* Require user approval before running.
+* Show result envelope in the browser.
+* Do not auto-submit responses.
+
+Status:
+
+```text
+Planned.
+```
+
+### 5. Auto Review / Auto Loop
+
+Goal:
+
+Reduce manual copy/paste further.
+
+Auto Review Mode:
+
+* Automatically run tasks that pass policy checks.
+* Stop on blocked or failed states.
+
+Auto Loop Mode:
+
+* Automatically send result envelope back to the web LLM.
+* Detect the next task envelope.
+* Repeat with strict loop limits.
+
+Required safety limits:
+
+* default OFF
+* user must explicitly start
+* max loop count
+* STOP button
+* stop on validation_failed
+* stop on patch_blocked
+* stop on command_blocked
+* stop on repeated failure
+
+Status:
+
+```text
+Future.
+```
+
+````
+
+---
+
+## 2. `docs/APOS_PROJECT_OVERVIEW.md`의 개발 우선순위 교체
+
+문서 아래쪽의 **“현재 개발 우선순위”** 부분을 아래로 바꿔.
+
+```markdown
+## 26. 현재 개발 우선순위
+
+현재 기준 다음 개발 우선순위는 다음과 같다.
+
+```text
+1. Search & Replace Patch Support
+2. APOS Context Pack v0.1
+3. Plan Only Mode
+4. Browser extension Safe Mode
+5. Browser extension Assisted Mode
+6. Auto Review Mode
+7. Auto Loop Mode
+8. In-chat Overlay
+````
+
+---
+
+### 26.1 Search & Replace Patch Support
+
+가장 먼저 구현할 기능이다.
+
+현재 APOS는 주로 파일 전체 내용을 `content`에 담아 생성/수정한다.
+
+작은 파일에서는 문제가 없지만, 긴 파일에서는 다음 문제가 생긴다.
+
+```text
+- JSON 출력이 길어진다.
+- 웹 LLM 출력이 중간에 끊길 수 있다.
+- 따옴표/줄바꿈 오류가 늘어난다.
+- 한 줄 수정에도 전체 파일을 다시 보내야 한다.
+- 불필요한 토큰을 많이 사용한다.
+```
+
+따라서 `intent: "search_and_replace"`를 도입한다.
+
+예상 patch 형식:
+
+```json
+{
+  "target": "workspace/example.py",
+  "language": "python",
+  "intent": "search_and_replace",
+  "search": "old code block",
+  "replace": "new code block",
+  "description": "Replace one specific block"
+}
+```
+
+안전 원칙:
+
+```text
+1. search는 정확히 한 번만 매칭되어야 한다.
+2. 0번 매칭이면 실패한다.
+3. 2번 이상 매칭이면 실패한다.
+4. 적용 전 preview를 생성한다.
+5. PatchPolicy는 그대로 적용한다.
+6. 보호 경로는 여전히 차단한다.
+```
+
+이 기능은 웹 LLM의 JSON 파싱 오류와 토큰 낭비를 줄이는 데 직접적으로 기여한다.
+
+---
+
+### 26.2 APOS Context Pack
+
+Search & Replace 다음으로 구현할 기능이다.
+
+Context Pack은 웹 LLM에게 현재 로컬 프로젝트 상태를 안전하게 전달하는 요약 정보다.
+
+Context Pack은 전체 파일 덤프가 아니다.
+
+Context Pack은 PatchPolicy의 보호 경로를 상속해야 한다.
+
+기본 제외 경로:
+
+```text
+.git/
+.venv/
+node_modules/
+__pycache__/
+.pytest_cache/
+.apos/
+*.sqlite3
+.env
+secrets.*
+private_key.*
+.codex/
+specifications/
+context/
+dist/
+build/
+```
+
+Context Pack은 다음 정보를 포함한다.
+
+```text
+- 프로젝트 루트
+- 허용된 작업 경로
+- 제외된 보호 경로
+- 현재 주요 파일 목록
+- 최근 task/result 요약
+- 안전 정책 요약
+- 웹 LLM에게 줄 주의사항
+```
+
+권장 제한:
+
+```text
+max_depth = 4
+max_files = 120
+max_file_preview_chars = 1200
+max_total_chars = 12000
+```
+
+---
+
+### 26.3 Plan Only Mode
+
+복잡한 작업을 한 번에 실행하지 않고 단계별 계획으로 나누기 위한 기능이다.
+
+예상 task type:
+
+```json
+"task_type": "plan_only"
+```
+
+목표:
+
+```text
+1. 웹 LLM이 먼저 작업 계획만 출력한다.
+2. APOS 또는 사용자가 계획을 확인한다.
+3. 각 단계를 작은 task envelope로 나누어 실행한다.
+4. Auto Loop에서 단계별 진행이 가능해진다.
+```
+
+Plan Only Mode는 Auto Loop의 안정성을 높이는 기반 기능이다.
+
+---
+
+### 26.4 Browser Extension Safe Mode
+
+브라우저 확장 v0.1의 목표다.
+
+기능:
+
+```text
+- ChatGPT/Gemini 응답에서 APOS task envelope JSON 감지
+- 코드블록 JSON 추출
+- 스트리밍 안정화 debounce
+- task envelope schema 검사
+- 중복 task_id 방지
+- Validate 버튼
+- Run 버튼
+- result envelope 표시
+- Copy Result 버튼
+```
+
+Safe Mode에서는 자동 실행하지 않는다.
+
+사용자가 명시적으로 실행해야 한다.
+
+---
+
+### 26.5 Auto Review Mode
+
+정책상 안전한 작업은 자동 실행하는 모드다.
+
+동작:
+
+```text
+- task envelope 자동 감지
+- validate 자동 수행
+- patch policy / command policy 통과 시 자동 실행
+- result envelope 자동 삽입
+- 실패/차단 상태에서는 중단
+```
+
+---
+
+### 26.6 Auto Loop Mode
+
+웹 LLM과 APOS가 제한된 횟수 안에서 반복 실행하는 모드다.
+
+필수 제한:
+
+```text
+- 기본 OFF
+- 사용자가 명시적으로 시작
+- 최대 반복 횟수 제한
+- STOP 버튼
+- 같은 실패 반복 시 중단
+- patch_blocked / command_blocked / validation_failed 발생 시 중단
+```
+
+Auto Loop는 APOS의 최종 UX 목표지만, Search & Replace, Context Pack, Plan Only Mode 이후에 구현한다.
+
+---
+
+### 26.7 In-chat Overlay
+
+브라우저 확장 안정화 이후 구현할 UX 기능이다.
+
+목표:
+
+```text
+- Gemini/ChatGPT 답변 하단에 APOS 실행 결과 표시
+- 성공/실패 상태를 인라인 카드로 표시
+- 로그 보기
+- 결과 복사
+- 결과 삽입
+```
+
+초기 구현은 floating panel이 우선이며, In-chat Overlay는 후순위다.
+
+````
+
+---
+
+## 3. `docs/task_envelope_prompt.md`에 주의 문구 추가
+
+아직 `search_and_replace`가 구현되지 않았으니까, 이 문구를 **Patch Rules 근처**에 추가해.
+
+```markdown
+## Currently Supported Patch Intents
+
+Currently supported patch intents are:
+
+- `create`
+- `update`
+- `overwrite`
+
+Do not output `search_and_replace` yet.
+
+`search_and_replace` is a planned APOS feature, but it is not available until the local APOS executor implements it.
+
+Until then, use `create`, `update`, or `overwrite`.
+````
+
+
