@@ -18,41 +18,151 @@ The web LLM only produces JSON. APOS performs validation, policy checks, executi
 
 ---
 
-## Current MVP Status
+## Standard Demo Flow
 
-Implemented and verified:
+APOS currently has two stable demo paths.
 
-- Task envelope validation
-- `--validate-only` mode
-- Patch dry-run preview
-- Safe path policy
-- Command policy
-- Local file create/update
-- Command execution
-- stdout/stderr capture
-- Result envelope output
-- SQLite history logging
-- Git snapshot support
-- Snapshot inspect / file-level restore
-- Web LLM → APOS → Web LLM manual loop
+### 1. Task Envelope Flow
 
-Verified loop:
+Use this for validation, preview, execution, and result recording.
 
 ```text
-Gemini generated task envelope JSON
-→ APOS validated it
-→ APOS created workspace/gemini_test.py
-→ APOS ran python workspace/gemini_test.py
-→ APOS returned result envelope
-→ Gemini generated the next update
-→ APOS updated and re-ran the file
+web LLM output JSON task envelope
+→ cli/run_task.py --validate-only or --json
+→ APOS validates / previews / applies / runs
+→ APOS writes result_envelope to workspace/.apos/history.sqlite3
 ```
+
+### 2. apos-patch Bridge Flow
+
+Use this for the browser extension path.
+
+```text
+web LLM emits apos-patch + source code blocks
+→ extension/contentScript.js detects the assistant/model pair, deduplicates by patch_id + sha256, and bounds retry state
+→ server/apos_server.py validates path, hash, and Python syntax
+→ server returns validation_passed or validation_failed
+→ human sends commit_patch
+→ server writes the file
+```
+
+Representative examples:
+
+- Validate-only: [examples/validate_only_demo.json](examples/validate_only_demo.json)
+- Preview patch: [examples/preview_patch_demo.json](examples/preview_patch_demo.json)
+- apos-patch approval and execute: [examples/apos_patch_demo.md](examples/apos_patch_demo.md)
+
+### Approval Queue
+
+Use the approval queue when you want to inspect or change status without immediately executing a plan step.
+
+```bash
+python cli/approvals.py list --workspace . --status pending
+python cli/approvals.py show approval-item-id --workspace .
+python cli/approvals.py approve approval-item-id --workspace . --approved-by alice
+python cli/approvals.py reject approval-item-id --workspace . --rejected-by bob
+```
+
+`cli/plan_approve.py` still exists for executing a recorded `plan_only` step after approval.
+
+For the canonical step lifecycle, use `python cli/apos.py plans ...` to list, inspect, approve, reject, and run plan steps. The main flow is covered by [tests/test_plan_management.py](tests/test_plan_management.py).
+
+See [examples/plan_step_demo.md](examples/plan_step_demo.md) for a full walkthrough.
+
+For a browser-based local dashboard, open `http://127.0.0.1:8082/ui` after starting `python server/list_approvals_endpoint.py`.
+
+See [docs/UI_OVERVIEW.md](docs/UI_OVERVIEW.md) and [examples/ui_demo.md](examples/ui_demo.md) for the dashboard routes and walkthrough.
+
+To inspect failures and drift from the same workspace history DB, use the report subcommands:
+
+```bash
+python cli/apos.py report failures --workspace . --format markdown
+python cli/apos.py report drift --workspace . --format markdown
+python cli/apos.py report next-prompt --workspace .
+```
+
+The dashboard also surfaces recent failed approval items and drift warnings from the same report builder.
+Failed item cards now include a failure summary, likely cause, affected files, and a copyable recovery prompt preview so you can move from dashboard review into recovery prompt generation without leaving the page.
+
+See [examples/failure_report_demo.md](examples/failure_report_demo.md) for a short walkthrough.
+
+For a paste-ready recovery prompt based on a failure, drift report, or plan-step failure, use:
+
+```bash
+python cli/apos.py recover prompt --latest --workspace . --output recovery_prompt.md --copy
+python cli/apos.py recover prompt --failure patch-failure --workspace .
+python cli/apos.py recover prompt --drift --workspace .
+python cli/apos.py recover prompt --plan-step plan-recover-demo 0 --workspace . --mode review
+```
+
+See [examples/recovery_prompt_demo.md](examples/recovery_prompt_demo.md) for a short walkthrough.
+
+## Known Limitations
+
+APOS v0.1 is intentionally bounded. See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the current limits, including the lack of direct automatic message forwarding to the web LLM, the absence of external browser automation and automatic loops, the need for manual approval queue review, and the fact that DOM-driven bridge flows can drift.
+
+APOS currently targets `websockets` 16.x and the modern `websockets.asyncio` server API. The local bridge server uses `websockets.asyncio.server.ServerConnection` and `serve`, so older legacy-only releases are not the supported baseline.
+
+For the v0.1 release snapshot, see [RELEASE_NOTES_v0.1.md](RELEASE_NOTES_v0.1.md).
+
+For the v0.2 release snapshot, see [RELEASE_NOTES_v0.2.md](RELEASE_NOTES_v0.2.md).
+
+For the v0.2.1 release snapshot, see [RELEASE_NOTES_v0.2.1.md](RELEASE_NOTES_v0.2.1.md).
+
+For the v0.3 semi-auto recovery design memo, see [docs/SEMI_AUTO_RECOVERY.md](docs/SEMI_AUTO_RECOVERY.md).
+It describes prompt-preparation automation only; it does not add auto-send, auto-approve, or auto-execute behavior.
+
+For the v0.3 release snapshot, see [RELEASE_NOTES_v0.3.md](RELEASE_NOTES_v0.3.md).
 
 ---
 
 ## Quick Start
 
-Run tests:
+The shortest path to a working APOS session is:
+
+1. Start the approval/dashboard server when you want to inspect queue state or use the local UI.
+
+```bash
+python server/list_approvals_endpoint.py
+```
+
+2. Generate a safe Context Pack from the current workspace.
+
+```bash
+python cli/apos.py context build --json
+python cli/apos.py context inspect --format markdown --output context_pack.md
+```
+
+3. Build a paste-ready prompt before sending anything back to the web LLM.
+
+```bash
+python cli/apos.py prompt build --goal "Add a new status summary command" --mode patch --output prompt.md
+python cli/apos.py prompt build --goal "Plan a staged refactor" --mode plan
+python cli/apos.py prompt build --goal "Review the workspace for risks" --mode review
+```
+
+4. Use the task-envelope demos for validate-only and preview flows.
+
+```bash
+python cli/run_task.py examples/validate_only_demo.json --validate-only --json
+python cli/run_task.py examples/preview_patch_demo.json --json
+```
+
+5. Run the browser bridge only when you want the `apos-patch` extension flow.
+
+```bash
+python server/apos_server.py
+```
+
+6. Inspect approval queue state, plan steps, and report output from the same history DB.
+
+```bash
+python cli/apos.py plans list --workspace . --json
+python cli/apos.py report failures --workspace . --format markdown
+python cli/apos.py report drift --workspace . --format markdown
+```
+
+7. Run the full test suite before treating the release as stable.
 
 ```bash
 python -m pytest
@@ -64,56 +174,31 @@ If you use the project virtual environment on Windows:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Validate a task envelope without applying patches or running commands:
-
-```bash
-python cli/run_task.py examples/task_patch_and_run.json --validate-only --json
-```
-
-Run a task envelope:
-
-```bash
-python cli/run_task.py examples/task_patch_and_run.json --json
-```
-
-Run the demo orchestrator:
-
-```bash
-python cli/run_orchestrator.py
-```
-
-Print demo result envelope JSON:
-
-```bash
-python cli/run_orchestrator.py --json
-```
-
 ---
 
 ## Normal Web LLM Workflow
 
-1. Paste `docs/task_envelope_prompt.md` into ChatGPT or Gemini.
-2. Ask the web LLM to output only APOS task envelope JSON.
-3. Save the JSON as:
+1. Start from [docs/task_envelope_prompt.md](docs/task_envelope_prompt.md) or [examples/apos_patch_demo.md](examples/apos_patch_demo.md).
+2. For task envelope work, save the JSON as:
 
 ```text
 examples/current_task.json
 ```
 
-4. Validate first:
+3. Validate first:
 
 ```powershell
 .\.venv\Scripts\python.exe cli\run_task.py examples\current_task.json --validate-only --json
 ```
 
-5. If validation succeeds, execute:
+4. If validation succeeds, preview or execute:
 
 ```powershell
 .\.venv\Scripts\python.exe cli\run_task.py examples\current_task.json --json
 ```
 
-6. Paste the result envelope JSON back into the web LLM.
-7. Ask it to generate the next APOS task envelope JSON.
+5. Paste the result envelope JSON back into the web LLM.
+6. For the Bridge Flow, keep the `apos-patch` metadata block and the source block adjacent, let the extension propose the patch, then approve the `commit_patch` request.
 
 ---
 
@@ -180,6 +265,7 @@ Supported task types:
 - `patch_and_run`
 - `preview_patch`
 - `restore_file`
+- `plan_only`
 
 ---
 
@@ -532,6 +618,22 @@ Context Pack should include:
 - current important files
 - recent task/result summaries
 - safety reminders
+
+The standard command is:
+
+```bash
+python cli/apos.py context build --json
+```
+
+For a paste-ready prompt summary, use Markdown:
+
+```bash
+python cli/apos.py context inspect --format markdown
+```
+
+The builder also supports `--output context_pack.json` or `--output context_pack.md`.
+
+See [examples/context_pack_demo.md](examples/context_pack_demo.md) for a paste-ready Markdown shape.
 
 It must inherit PatchPolicy exclusions.
 
