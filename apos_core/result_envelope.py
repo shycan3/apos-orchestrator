@@ -15,6 +15,10 @@ ALLOWED_STATUSES = {
     "snapshot_failed",
     "validation_failed",
     "internal_error",
+    "skipped",
+    "not_found",
+    "invalid_step",
+    "invalid_task_type",
 }
 
 

@@ -16,6 +16,7 @@ from .snapshot import SnapshotManager
 from .command_policy import CommandPolicy, AllowAllCommandPolicy
 from .result_envelope import build_result_envelope, utc_now_iso
 from .task_envelope import validate_task_envelope, envelope_to_task
+from .plan_flow import PlanStepManager
 
 
 class Orchestrator:
@@ -117,6 +118,7 @@ class Orchestrator:
             if task_type == "plan_only":
                 task = envelope_to_task(normalized)
                 task_id = task["id"]
+                self.recorder.record_task(task_id, normalized)
                 plan_meta = dict(normalized.get("meta", {}))
                 plan_steps = plan_meta.get("plan_steps", [])
                 plan_goal = plan_meta.get("plan_goal") or plan_meta.get("goal") or ""
@@ -521,6 +523,30 @@ class Orchestrator:
         except Exception:
             return []
 
+    def list_pending_approvals(self, task_id: Optional[str] = None, patch_id: Optional[str] = None, item_id: Optional[str] = None, status: Optional[str] = None, item_type: Optional[str] = None, limit: Optional[int] = None, offset: Optional[int] = None):
+        try:
+            return self.recorder.list_approval_items(task_id=task_id, patch_id=patch_id, item_id=item_id, status=status, item_type=item_type, limit=limit, offset=offset)
+        except Exception:
+            return []
+
+    def get_pending_approval(self, item_id: str):
+        try:
+            return self.recorder.get_approval_item(item_id)
+        except Exception:
+            return None
+
+    def approve_pending_approval(self, item_id: str, approved_by: Optional[str] = None, reason: Optional[str] = None):
+        try:
+            return self.recorder.update_approval_item_status(item_id, "approved", decided_by=approved_by, decision_reason=reason, meta={"decision": "approved"})
+        except Exception:
+            return None
+
+    def reject_pending_approval(self, item_id: str, rejected_by: Optional[str] = None, reason: Optional[str] = None):
+        try:
+            return self.recorder.update_approval_item_status(item_id, "rejected", decided_by=rejected_by, decision_reason=reason, meta={"decision": "rejected"})
+        except Exception:
+            return None
+
     def approval_report(self, task_id: str, limit: int = 100):
         """Return a concise approval report for `task_id`.
 
@@ -532,6 +558,27 @@ class Orchestrator:
         approvers = sorted({a.get("approved_by") for a in approvals if a.get("approved_by")})
         last = approvals[-1] if approvals else None
         return {"task_id": task_id, "count": total, "approvers": approvers, "last": last}
+
+    def list_plans(self, limit: Optional[int] = None, offset: Optional[int] = None):
+        return PlanStepManager(self).list_plans(limit=limit, offset=offset)
+
+    def get_plan(self, task_id: str):
+        return PlanStepManager(self).get_plan(task_id)
+
+    def list_plan_steps(self, task_id: str):
+        return PlanStepManager(self).list_steps(task_id)
+
+    def get_plan_step(self, task_id: str, step_index: int):
+        return PlanStepManager(self).get_step(task_id, step_index)
+
+    def approve_plan_step(self, task_id: str, step_index: int, approved_by: Optional[str] = None, reason: Optional[str] = None):
+        return PlanStepManager(self).approve_step(task_id, step_index, approved_by=approved_by, reason=reason)
+
+    def reject_plan_step(self, task_id: str, step_index: int, rejected_by: Optional[str] = None, reason: Optional[str] = None):
+        return PlanStepManager(self).reject_step(task_id, step_index, rejected_by=rejected_by, reason=reason)
+
+    def run_plan_step(self, task_id: str, step_index: int, approved_by: Optional[str] = None, force: bool = False):
+        return PlanStepManager(self).run_step(task_id, step_index, approved_by=approved_by, force=force)
 
     def _worker_loop(self):
         while not self._stop_event.is_set():
@@ -585,191 +632,5 @@ class Orchestrator:
                 self._queue.task_done()
 
     def execute_plan_step(self, task_id: str, step_index: int, approved_by: Optional[str] = None) -> dict:
-        """Execute a single step from a previously recorded plan_only task.
-
-        Fetches the task envelope from the recorder, validates it is a plan_only
-        envelope, constructs a standalone step task, applies patches and runs
-        the first command synchronously via the Executor, records and returns
-        a result envelope.
-        """
-        task_payload = self.recorder.get_task(task_id)
-        if not task_payload:
-            return {
-                "schema_version": "1.0",
-                "task_id": task_id,
-                "status": "not_found",
-                "exit_code": -2,
-                "stderr": "task_not_found",
-            }
-
-        check = validate_task_envelope(task_payload)
-        if not check.get("ok"):
-            started_at = utc_now_iso()
-            finished_at = utc_now_iso()
-            return build_result_envelope(
-                task_id=task_id,
-                status="validation_failed",
-                exit_code=-6,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=0,
-                patch_applied=False,
-                patch_blocked=False,
-                patch_blocked_reason="",
-                patch_preview=None,
-                snapshot_enabled=self.enable_snapshots,
-                snapshot_commit=None,
-                snapshot_error="",
-                command=None,
-                command_allowed=None,
-                policy_blocked=False,
-                blocked_reason="",
-                stdout="",
-                stderr="task_envelope_validation_failed",
-                workspace_root=self.workspace_root,
-                history_db_path=str(self.recorder.db_path),
-                meta={"validation_errors": check.get("errors", [])},
-            )
-
-        normalized = check["normalized"]
-        if normalized.get("task_type") != "plan_only":
-            return {
-                "schema_version": "1.0",
-                "task_id": task_id,
-                "status": "invalid_task_type",
-                "exit_code": -7,
-                "stderr": "not_a_plan_only_task",
-            }
-
-        meta = normalized.get("meta", {})
-        plan_steps = meta.get("plan_steps", [])
-        if step_index < 0 or step_index >= len(plan_steps):
-            return {
-                "schema_version": "1.0",
-                "task_id": task_id,
-                "status": "invalid_step",
-                "exit_code": -8,
-                "stderr": "invalid_step_index",
-            }
-
-        step = plan_steps[step_index]
-
-        # Build a standalone task for the step
-        step_task_type = step.get("task_type")
-        step_patches = step.get("patches", [])
-        step_commands = step.get("commands", [])
-
-        # Prepare executor changes
-        executor_changes = []
-        for p in step_patches:
-            change = {
-                "path": p.get("target"),
-                "action": "modify" if p.get("intent") in {"update", "modify"} else p.get("intent") or "modify",
-                "content": p.get("content", ""),
-            }
-            if p.get("intent") == "search_and_replace":
-                change["action"] = "search_and_replace"
-                change["search"] = p.get("search")
-                change["replace"] = p.get("replace")
-            executor_changes.append(change)
-
-        # record approval event before execution (if provided)
-        try:
-            approval_id = str(uuid.uuid4())
-            self.recorder.record_approval(approval_id, task_id, step_index, approved_by or "", {"initiated_at": utc_now_iso()})
-        except Exception:
-            pass
-
-        started_at = utc_now_iso()
-        try:
-            patch_results = []
-            if executor_changes:
-                patch_results = self.executor.apply_patch(executor_changes)
-
-            cmd_result = None
-            if step_commands:
-                cmd = step_commands[0].get("command")
-                timeout = int(step_commands[0].get("timeout_seconds", 30))
-                cmd_result = self.executor.run_command(cmd, cwd=normalized.get("workspace_root") or self.workspace_root, timeout=timeout)
-
-            finished_at = utc_now_iso()
-
-            status = "success"
-            exit_code = 0
-            stdout = ""
-            stderr = ""
-            if cmd_result:
-                exit_code = cmd_result.get("exit_code")
-                stdout = cmd_result.get("stdout", "")
-                stderr = cmd_result.get("stderr", "")
-                if exit_code not in (0, None):
-                    status = "failed"
-
-            result_envelope = build_result_envelope(
-                task_id=f"{task_id}-step-{step_index}",
-                status=status,
-                exit_code=exit_code,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=0,
-                patch_applied=bool(patch_results),
-                patch_blocked=False,
-                patch_blocked_reason="",
-                patch_preview=patch_results or None,
-                snapshot_enabled=False,
-                snapshot_commit=None,
-                snapshot_error="",
-                command=step_commands[0] if step_commands else None,
-                command_allowed=True,
-                policy_blocked=False,
-                blocked_reason="",
-                stdout=stdout,
-                stderr=stderr,
-                workspace_root=normalized.get("workspace_root") or self.workspace_root,
-                history_db_path=str(self.recorder.db_path),
-                meta={"plan_parent": task_id, "plan_step_index": step_index, "approved_by": approved_by},
-            )
-
-            # record result
-            try:
-                self.recorder.record_result(
-                    str(uuid.uuid4()),
-                    result_envelope.get("task_id"),
-                    result_envelope.get("exit_code"),
-                    result_envelope.get("stdout"),
-                    result_envelope.get("stderr"),
-                    {"task_type": step_task_type},
-                    result_envelope=result_envelope,
-                )
-            except Exception:
-                pass
-
-            return result_envelope
-
-        except Exception as exc:
-            finished_at = utc_now_iso()
-            return build_result_envelope(
-                task_id=f"{task_id}-step-{step_index}",
-                status="internal_error",
-                exit_code=-1,
-                started_at=started_at,
-                finished_at=finished_at,
-                duration_ms=0,
-                patch_applied=False,
-                patch_blocked=False,
-                patch_blocked_reason="",
-                patch_preview=None,
-                snapshot_enabled=False,
-                snapshot_commit=None,
-                snapshot_error="",
-                command=None,
-                command_allowed=None,
-                policy_blocked=False,
-                blocked_reason="",
-                stdout="",
-                stderr=str(exc),
-                workspace_root=normalized.get("workspace_root") or self.workspace_root,
-                history_db_path=str(self.recorder.db_path),
-                meta={"plan_parent": task_id, "plan_step_index": step_index, "approved_by": approved_by},
-            )
+        return PlanStepManager(self).run_step(task_id, step_index, approved_by=approved_by)
 

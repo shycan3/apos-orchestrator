@@ -17,6 +17,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from cli.context_pack import add_context_arguments, execute_context_pack
+from apos_core.prompt_builder import PromptBuilder
+from apos_core.recovery_prompt_builder import RecoveryPromptBuilder
+from apos_core.report_builder import ReportBuilder
+from apos_core.orchestrator import Orchestrator
+from apos_core.plan_flow import PlanStepManager
+
 try:
     import tomllib
 except ImportError:  # pragma: no cover - Python < 3.11 fallback message.
@@ -507,6 +518,86 @@ def print_codex_prompt() -> None:
     print(codex_prompt())
 
 
+def _make_plan_manager(workspace: str, history_db: str | None) -> tuple[Orchestrator, PlanStepManager]:
+    workspace_root = str(Path(workspace).resolve())
+    history_db_path = Path(history_db) if history_db else Path(workspace_root) / ".apos" / "history.sqlite3"
+    orch = Orchestrator(workspace_root=workspace_root, history_db_path=history_db_path)
+    return orch, PlanStepManager(orch)
+
+
+def _print_plan_payload(payload: Any, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if isinstance(payload, list):
+        for item in payload:
+            print(item)
+        return
+    if isinstance(payload, dict):
+        if "steps" in payload:
+            print(f"task_id={payload.get('task_id')} step_count={payload.get('step_count')} plan_goal={payload.get('plan_goal', '')}")
+            for step in payload.get("steps", []):
+                print(
+                    f"- step {step.get('step_index')}: {step.get('title')} status={step.get('status')} approved_by={step.get('approved_by') or ''}"
+                )
+            return
+        if "task_type" in payload and payload.get("task_type") == "plan_only":
+            print(
+                f"task_id={payload.get('task_id')} step_count={payload.get('step_count')} pending={payload.get('pending_count', 0)} executed={payload.get('executed_count', 0)} failed={payload.get('failed_count', 0)}"
+            )
+            return
+    print(str(payload))
+
+
+def _build_plan_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument("--workspace", default=".", help="Workspace root")
+    parser.add_argument("--history-db", default=None, help="Path to history SQLite database")
+    parser.add_argument("--json", action="store_true", help="Print JSON output")
+    return parser
+
+
+def _build_prompt_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument("--workspace-root", default=str(PROJECT_ROOT), help="Workspace root to scan")
+    parser.add_argument("--history-db", default=None, help="Path to the APOS history SQLite database")
+    parser.add_argument("--max-depth", type=int, default=4)
+    parser.add_argument("--max-files", type=int, default=120)
+    parser.add_argument("--max-file-preview-chars", type=int, default=1200)
+    parser.add_argument("--max-total-chars", type=int, default=12000)
+    parser.add_argument("--goal", required=True, help="User goal to embed in the generated prompt")
+    parser.add_argument("--mode", choices=("patch", "plan", "review"), default="patch")
+    parser.add_argument("--output", default=None, help="Write the rendered prompt to this file")
+    parser.add_argument("--copy", action="store_true", help="Best-effort copy the rendered prompt to the clipboard")
+    return parser
+
+
+def _build_report_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument("--workspace", default=".", help="Workspace root")
+    parser.add_argument("--history-db", default=None, help="Path to history SQLite database")
+    parser.add_argument("--limit", type=int, default=5, help="Maximum number of failures or drift items to report")
+    parser.add_argument("--format", choices=("markdown", "json"), default="markdown", help="Render format")
+    return parser
+
+
+def _build_recover_prompt_subparser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument("--workspace", default=".", help="Workspace root")
+    parser.add_argument("--history-db", default=None, help="Path to history SQLite database")
+    parser.add_argument("--limit", type=int, default=5, help="Maximum number of history items to inspect")
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "patch", "plan", "review"),
+        default=None,
+        help="Choose auto recommendation or override the recovery mode",
+    )
+    parser.add_argument("--output", default=None, help="Write the recovery prompt to this file")
+    parser.add_argument("--copy", action="store_true", help="Best-effort copy the recovery prompt to the clipboard")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--failure", dest="failure_id", default=None, help="Recover from a specific failure identifier")
+    source.add_argument("--latest", action="store_true", help="Recover from the latest failure")
+    source.add_argument("--drift", action="store_true", help="Recover from the latest drift report")
+    source.add_argument("--plan-step", nargs=2, metavar=("TASK_ID", "STEP_INDEX"), help="Recover from a plan step failure")
+    return parser
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="APOS v3.2 + Bridge Protocol Pure Shell CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -522,6 +613,80 @@ def build_parser() -> argparse.ArgumentParser:
     summarize_parser.add_argument("project_path")
 
     subparsers.add_parser("codex", help="print APOS Codex handoff instruction")
+
+    context_parser = subparsers.add_parser("context", help="build or inspect an APOS context pack")
+    context_subparsers = context_parser.add_subparsers(dest="context_command", required=True)
+
+    build_parser = context_subparsers.add_parser("build", help="build a safe context pack")
+    add_context_arguments(build_parser)
+
+    inspect_parser = context_subparsers.add_parser("inspect", help="print a human-friendly context pack")
+    add_context_arguments(inspect_parser)
+
+    prompt_parser = subparsers.add_parser("prompt", help="build a paste-ready APOS prompt")
+    prompt_subparsers = prompt_parser.add_subparsers(dest="prompt_command", required=True)
+
+    prompt_build = prompt_subparsers.add_parser("build", help="build a paste-ready APOS prompt")
+    _build_prompt_subparser(prompt_build)
+
+    report_parser = subparsers.add_parser("report", help="generate failure and drift reports")
+    report_subparsers = report_parser.add_subparsers(dest="report_command", required=True)
+
+    report_failures = report_subparsers.add_parser("failures", help="list recent failures")
+    _build_report_subparser(report_failures)
+
+    report_failure = report_subparsers.add_parser("failure", help="show a single failure report")
+    _build_report_subparser(report_failure)
+    report_failure.add_argument("identifier")
+
+    report_drift = report_subparsers.add_parser("drift", help="show drift signals")
+    _build_report_subparser(report_drift)
+
+    report_next_prompt = report_subparsers.add_parser("next-prompt", help="print the recommended next prompt")
+    _build_report_subparser(report_next_prompt)
+
+    recover_parser = subparsers.add_parser("recover", help="generate recovery prompts from failures or drift")
+    recover_subparsers = recover_parser.add_subparsers(dest="recover_command", required=True)
+    recover_prompt = recover_subparsers.add_parser("prompt", help="build a recovery prompt")
+    _build_recover_prompt_subparser(recover_prompt)
+
+    plans_parser = subparsers.add_parser("plans", help="manage plan_only tasks and steps")
+    plans_subparsers = plans_parser.add_subparsers(dest="plans_command", required=True)
+
+    plans_list = plans_subparsers.add_parser("list", help="list plan_only tasks")
+    _build_plan_subparser(plans_list)
+    plans_list.add_argument("--limit", type=int, default=None)
+    plans_list.add_argument("--offset", type=int, default=None)
+
+    plans_show = plans_subparsers.add_parser("show", help="show a recorded plan")
+    _build_plan_subparser(plans_show)
+    plans_show.add_argument("task_id")
+
+    plans_steps = plans_subparsers.add_parser("steps", help="list steps for a plan")
+    _build_plan_subparser(plans_steps)
+    plans_steps.add_argument("task_id")
+
+    plans_approve = plans_subparsers.add_parser("approve-step", help="approve a step")
+    _build_plan_subparser(plans_approve)
+    plans_approve.add_argument("task_id")
+    plans_approve.add_argument("step_index", type=int)
+    plans_approve.add_argument("--approved-by", default="manual")
+    plans_approve.add_argument("--reason", default=None)
+
+    plans_reject = plans_subparsers.add_parser("reject-step", help="reject a step")
+    _build_plan_subparser(plans_reject)
+    plans_reject.add_argument("task_id")
+    plans_reject.add_argument("step_index", type=int)
+    plans_reject.add_argument("--rejected-by", default="manual")
+    plans_reject.add_argument("--reason", default=None)
+
+    plans_run = plans_subparsers.add_parser("run-step", help="run an approved step")
+    _build_plan_subparser(plans_run)
+    plans_run.add_argument("task_id")
+    plans_run.add_argument("step_index", type=int)
+    plans_run.add_argument("--approved-by", default=None, help="Optional runner identifier for audit metadata")
+    plans_run.add_argument("--force", action="store_true", help="Allow rerun of executed or failed steps")
+
     return parser
 
 
@@ -543,6 +708,153 @@ def main(argv: List[str] | None = None) -> int:
     if args.command == "codex":
         print_codex_prompt()
         return 0
+
+    if args.command == "context":
+        output_format = "json"
+        if args.context_command == "inspect":
+            output_format = "markdown"
+        if getattr(args, "json", False):
+            output_format = "json"
+        elif getattr(args, "format", None):
+            output_format = args.format
+        execute_context_pack(
+            workspace_root=args.workspace_root,
+            history_db_path=args.history_db,
+            max_depth=args.max_depth,
+            max_files=args.max_files,
+            max_file_preview_chars=args.max_file_preview_chars,
+            max_total_chars=args.max_total_chars,
+            output_format=output_format,
+            output_path=args.output,
+        )
+        return 0
+
+    if args.command == "prompt":
+        if args.prompt_command == "build":
+            builder = PromptBuilder(args.workspace_root, history_db_path=args.history_db)
+            try:
+                prompt_text = builder.build(
+                    goal=args.goal,
+                    mode=args.mode,
+                    max_depth=args.max_depth,
+                    max_files=args.max_files,
+                    max_file_preview_chars=args.max_file_preview_chars,
+                    max_total_chars=args.max_total_chars,
+                )
+            except ValueError as exc:
+                abort(str(exc))
+            builder.write_output(prompt_text, args.output)
+            if args.copy and not builder.copy_to_clipboard(prompt_text):
+                print("APOS warning: clipboard copy failed; prompt output was still generated.", file=sys.stderr)
+            print(prompt_text, end="")
+            return 0
+
+        abort(f"unknown prompt command: {args.prompt_command}")
+
+    if args.command == "report":
+        builder = ReportBuilder(args.workspace, history_db_path=args.history_db)
+        try:
+            if args.report_command == "failures":
+                report = builder.build_failure_report(limit=args.limit)
+                rendered = builder.render_markdown(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2)
+                print(rendered, end="")
+                return 0
+
+            if args.report_command == "failure":
+                report = builder.build_failure_detail(args.identifier, limit=args.limit)
+                rendered = builder.render_markdown(report) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2)
+                print(rendered, end="")
+                return 0
+
+            if args.report_command == "drift":
+                report = builder.build_drift_report(limit=args.limit)
+                rendered = builder.render_drift_markdown(limit=args.limit) if args.format == "markdown" else json.dumps(report, ensure_ascii=False, indent=2)
+                print(rendered, end="")
+                return 0
+
+            if args.report_command == "next-prompt":
+                print(builder.build_next_prompt(limit=args.limit))
+                return 0
+
+            abort(f"unknown report command: {args.report_command}")
+        finally:
+            builder.close()
+
+    if args.command == "recover":
+        if args.recover_command == "prompt":
+            builder = RecoveryPromptBuilder(args.workspace, history_db_path=args.history_db)
+            try:
+                plan_step = None
+                if getattr(args, "plan_step", None):
+                    plan_step = (str(args.plan_step[0]), int(args.plan_step[1]))
+                recovery = builder.build(
+                    failure_id=args.failure_id,
+                    latest=bool(args.latest),
+                    drift=bool(args.drift),
+                    plan_step=plan_step,
+                    mode=args.mode,
+                    limit=args.limit,
+                )
+                prompt_text = recovery["prompt_text"]
+                builder.write_output(prompt_text, args.output)
+                if args.copy and not builder.copy_to_clipboard(prompt_text):
+                    print("APOS warning: clipboard copy failed; recovery prompt output was still generated.", file=sys.stderr)
+                print(prompt_text, end="")
+                return 0
+            finally:
+                builder.close()
+
+        abort(f"unknown recover command: {args.recover_command}")
+
+    if args.command == "plans":
+        orch, manager = _make_plan_manager(args.workspace, args.history_db)
+        try:
+            if args.plans_command == "list":
+                payload = manager.list_plans(limit=args.limit, offset=args.offset)
+                _print_plan_payload(payload, args.json)
+                return 0
+
+            if args.plans_command == "show":
+                payload = manager.get_plan(args.task_id)
+                if not payload:
+                    abort(f"plan not found: {args.task_id}")
+                _print_plan_payload(payload, args.json)
+                return 0
+
+            if args.plans_command == "steps":
+                payload = manager.list_steps(args.task_id)
+                if not payload:
+                    abort(f"plan not found: {args.task_id}")
+                _print_plan_payload(payload, args.json)
+                return 0
+
+            if args.plans_command == "approve-step":
+                payload = manager.approve_step(args.task_id, args.step_index, approved_by=args.approved_by, reason=args.reason)
+                if not payload:
+                    abort(f"plan step not found: {args.task_id}:{args.step_index}")
+                _print_plan_payload(payload, args.json)
+                return 0
+
+            if args.plans_command == "reject-step":
+                payload = manager.reject_step(args.task_id, args.step_index, rejected_by=args.rejected_by, reason=args.reason)
+                if not payload:
+                    abort(f"plan step not found: {args.task_id}:{args.step_index}")
+                _print_plan_payload(payload, args.json)
+                return 0
+
+            if args.plans_command == "run-step":
+                payload = manager.run_step(args.task_id, args.step_index, approved_by=args.approved_by, force=args.force)
+                if isinstance(payload, dict) and payload.get("status") in {"not_found", "invalid_step", "invalid_task_type"}:
+                    abort(f"plan step not runnable: {args.task_id}:{args.step_index} ({payload.get('status')})")
+                _print_plan_payload(payload, args.json)
+                return 0
+
+            abort(f"unknown plans command: {args.plans_command}")
+        finally:
+            try:
+                orch.stop()
+            except Exception:
+                pass
 
     abort(f"unknown command: {args.command}")
     return 2
