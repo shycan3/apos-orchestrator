@@ -1,35 +1,982 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>APOS Approvals</title>
-  <style>body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f4f4f4}</style>
-</head>
-<body>
-  <h1>Approvals</h1>
-  <form id="q">
-    Task ID: <input id="task" name="task" />
-    Approver: <input id="approver" name="approver" />
-    <button>Lookup</button>
-  </form>
-  <div id="msg"></div>
-  <table id="tbl" style="display:none"><thead><tr><th>id</th><th>step</th><th>approver</th><th>timestamp</th><th>meta</th></tr></thead><tbody></tbody></table>
-  <script>
-  async function fetchApprovals(q){
-    const url = '/approvals?task_id='+encodeURIComponent(q.task)+'&approver='+encodeURIComponent(q.approver||'')
-    const resp = await fetch(url, {headers: {'X-APOS-Approve-Token': ''}})
-    if(!resp.ok){ document.getElementById('msg').textContent='Error: '+resp.status; return }
-    const data = await resp.json()
-    const tbody = document.querySelector('#tbl tbody')
-    tbody.innerHTML=''
-    for(const a of data){
-      const tr = document.createElement('tr')
-      tr.innerHTML = `<td>${a.id}</td><td>${a.step_index}</td><td>${a.approved_by}</td><td>${new Date(a.timestamp*1000).toISOString()}</td><td>${JSON.stringify(a.meta)}</td>`
-      tbody.appendChild(tr)
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>APOS Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --ink: #172033;
+      --muted: #5d6b83;
+      --line: #d8e0ec;
+      --accent: #2458ff;
+      --accent-2: #0f9d7a;
+      --danger: #c83e4d;
+      --warn: #ab6a00;
+      --shadow: 0 12px 32px rgba(15, 31, 62, 0.08);
+      --radius: 16px;
     }
-    document.getElementById('tbl').style.display='table'
-  }
-  document.getElementById('q').addEventListener('submit', (e)=>{e.preventDefault(); fetchApprovals({task:document.getElementById('task').value, approver:document.getElementById('approver').value})})
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(36, 88, 255, 0.12), transparent 30%),
+        radial-gradient(circle at top right, rgba(15, 157, 122, 0.12), transparent 28%),
+        var(--bg);
+    }
+
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(12px);
+      background: rgba(245, 247, 251, 0.82);
+      border-bottom: 1px solid rgba(216, 224, 236, 0.8);
+    }
+
+    .wrap {
+      max-width: 1500px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .hero {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: end;
+      justify-content: space-between;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: -0.03em;
+    }
+
+    .subtle { color: var(--muted); font-size: 14px; }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr auto;
+      gap: 10px;
+      align-items: end;
+      min-width: min(100%, 720px);
+    }
+
+    .field { display: grid; gap: 6px; }
+    .field label { font-size: 12px; color: var(--muted); }
+    .field input, .field select, .field button, .inline-input {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font: inherit;
+    }
+
+    .field input:focus, .field select:focus, .field button:focus, .inline-input:focus {
+      outline: 2px solid rgba(36, 88, 255, 0.2);
+      border-color: rgba(36, 88, 255, 0.4);
+    }
+
+    button {
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(15, 31, 62, 0.08); }
+    button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+    button.ghost { background: transparent; }
+    button.danger { background: rgba(200, 62, 77, 0.08); color: var(--danger); border-color: rgba(200, 62, 77, 0.18); }
+    button.good { background: rgba(15, 157, 122, 0.08); color: var(--accent-2); border-color: rgba(15, 157, 122, 0.18); }
+
+    main { padding: 20px; }
+    .tabs {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 18px 0 20px;
+    }
+    .tabs a {
+      text-decoration: none;
+      color: var(--ink);
+      background: rgba(255,255,255,.8);
+      border: 1px solid var(--line);
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .tabs a.active { background: var(--ink); color: white; border-color: var(--ink); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(216, 224, 236, .9);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+    .card h2, .section h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .metric { font-size: 32px; font-weight: 800; letter-spacing: -0.03em; }
+
+    .section {
+      background: rgba(255,255,255,.75);
+      border: 1px solid rgba(216, 224, 236, .8);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .panel-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 13px;
+    }
+    th {
+      background: #f7f9fc;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    tr:hover td { background: #fbfcff; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .badge.pending { background: rgba(171, 106, 0, .10); color: var(--warn); }
+    .badge.approved, .badge.executed { background: rgba(15, 157, 122, .10); color: var(--accent-2); }
+    .badge.rejected, .badge.failed { background: rgba(200, 62, 77, .10); color: var(--danger); }
+    .badge.running { background: rgba(36, 88, 255, .10); color: var(--accent); }
+    .badge.skipped { background: rgba(93, 107, 131, .10); color: var(--muted); }
+
+    .banner {
+      display: none;
+      margin: 16px 0 0;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(171, 106, 0, 0.18);
+      background: rgba(171, 106, 0, 0.10);
+      color: var(--warn);
+      font-weight: 700;
+    }
+
+    .detail-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .info-card {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .info-label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .info-value {
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .prompt-box {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      font: inherit;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      background: #fbfcff;
+      color: var(--ink);
+    }
+
+    .stack { display: grid; gap: 8px; }
+    .muted { color: var(--muted); }
+    .detail {
+      background: white;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      min-height: 160px;
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .small { font-size: 12px; }
+    .pill { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: #edf2ff; color: var(--accent); font-weight: 700; }
+    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .row-actions button { padding: 7px 10px; font-size: 12px; }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    @media (max-width: 1200px) {
+      .grid, .panel-grid { grid-template-columns: 1fr 1fr; }
+      .controls { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 780px) {
+      .grid, .panel-grid { grid-template-columns: 1fr; }
+      .wrap { padding: 14px; }
+      main { padding: 14px; }
+    }
+  </style>
+</head>
+<body data-apos-view="dashboard">
+  <header>
+    <div class="wrap">
+      <div class="hero">
+        <div>
+          <h1>APOS Dashboard</h1>
+          <div class="subtle">Local approvals, plan steps, and execution state in one place.</div>
+        </div>
+        <div class="controls">
+          <div class="field">
+            <label for="workspace">Workspace</label>
+            <input id="workspace" value="." placeholder="." />
+          </div>
+          <div class="field">
+            <label for="token">Approve token (optional)</label>
+            <input id="token" type="password" placeholder="optional" />
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button class="primary" id="refreshBtn">Refresh</button>
+          </div>
+        </div>
+      </div>
+      <div class="tabs">
+        <a href="#home" class="active">Home</a>
+        <a href="#approvals">Approvals</a>
+        <a href="#plans">Plans</a>
+      </div>
+      <div id="driftBanner" class="banner"></div>
+      <div id="recoveryBanner" class="banner" style="border-color: rgba(36, 88, 255, 0.18); background: rgba(36, 88, 255, 0.08); color: var(--accent);"></div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="home" class="section">
+      <h2>Home / Dashboard</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="muted small">Pending approvals</div>
+          <div class="metric" id="pendingCount">0</div>
+        </div>
+        <div class="card">
+          <div class="muted small">Failed items</div>
+          <div class="metric" id="failedCount">0</div>
+        </div>
+        <div class="card">
+          <div class="muted small">Recent executed items</div>
+          <div class="metric" id="executedCount">0</div>
+        </div>
+        <div class="card">
+          <div class="muted small">Recent plans</div>
+          <div class="metric" id="planCount">0</div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="card stack">
+          <h2>Recent Executed Items</h2>
+          <div id="recentExecuted" class="stack"></div>
+        </div>
+        <div class="card stack">
+          <h2>Recent Plans</h2>
+          <div id="recentPlans" class="stack"></div>
+        </div>
+      </div>
+
+      <div class="card stack" style="margin-top: 16px;">
+        <h2>Recent Failed Items</h2>
+        <div id="recentFailed" class="stack"></div>
+      </div>
+    </section>
+
+    <section id="approvals" class="section">
+      <h2>Approvals</h2>
+      <div class="subtle">Inspect queue items, approve or reject them, and open detail for stored payloads and latest results.</div>
+      <div class="panel-grid" style="margin-top: 12px;">
+        <div>
+          <table>
+            <thead>
+              <tr>
+                <th>id</th>
+                <th>type</th>
+                <th>status</th>
+                <th>target</th>
+                <th>created_at</th>
+                <th>decided_at</th>
+                <th>actions</th>
+              </tr>
+            </thead>
+            <tbody id="approvalsBody"></tbody>
+          </table>
+        </div>
+        <div class="card stack">
+          <h2>Approval Detail</h2>
+          <div id="approvalDetail" class="detail">Select an approval item.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="plans" class="section">
+      <h2>Plans</h2>
+      <div class="subtle">Recorded plan_only tasks with step counts, status summary, and per-step actions.</div>
+      <div class="panel-grid" style="margin-top: 12px;">
+        <div>
+          <table>
+            <thead>
+              <tr>
+                <th>task_id</th>
+                <th>title / summary</th>
+                <th>step count</th>
+                <th>latest</th>
+                <th>actions</th>
+              </tr>
+            </thead>
+            <tbody id="plansBody"></tbody>
+          </table>
+        </div>
+        <div class="card stack">
+          <h2>Plan Detail</h2>
+          <div id="planDetail" class="detail">Select a plan.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      dashboard: null,
+      approvals: [],
+      plans: [],
+      selectedApprovalId: null,
+      selectedPlanId: null,
+    };
+
+    const workspaceInput = document.getElementById('workspace');
+    const tokenInput = document.getElementById('token');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    function loadSettings() {
+      workspaceInput.value = localStorage.getItem('apos_dashboard_workspace') || '.';
+      tokenInput.value = localStorage.getItem('apos_dashboard_token') || '';
+    }
+
+    function saveSettings() {
+      localStorage.setItem('apos_dashboard_workspace', workspaceInput.value.trim() || '.');
+      localStorage.setItem('apos_dashboard_token', tokenInput.value || '');
+    }
+
+    function authHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = tokenInput.value.trim();
+      if (token) {
+        headers['X-APOS-Approve-Token'] = token;
+      }
+      return headers;
+    }
+
+    function workspaceQuery() {
+      return 'workspace=' + encodeURIComponent(workspaceInput.value.trim() || '.');
+    }
+
+    async function fetchJson(path, options = {}) {
+      const url = new URL(path, window.location.origin);
+      url.searchParams.set('workspace', workspaceInput.value.trim() || '.');
+      const requestOptions = { ...options };
+      requestOptions.headers = { ...(options.headers || {}) };
+      const token = tokenInput.value.trim();
+      if (token) {
+        requestOptions.headers['X-APOS-Approve-Token'] = token;
+      }
+      if (!requestOptions.method || requestOptions.method === 'GET') {
+        delete requestOptions.body;
+      }
+      const response = await fetch(url.toString(), requestOptions);
+      const text = await response.text();
+      let data = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch (err) {
+        data = { raw: text };
+      }
+      if (!response.ok) {
+        const error = new Error((data && data.error) || response.statusText || 'request_failed');
+        error.status = response.status;
+        error.data = data;
+        throw error;
+      }
+      return data;
+    }
+
+    function fmtTime(value) {
+      if (value === null || value === undefined || value === '') return '-';
+      if (typeof value === 'number') {
+        return new Date(value * 1000).toLocaleString();
+      }
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric) && String(value).trim() !== '') {
+        return new Date(numeric * 1000).toLocaleString();
+      }
+      return String(value);
+    }
+
+    function badge(status) {
+      return '<span class="badge ' + String(status || 'pending').toLowerCase() + '">' + escapeHtml(status || 'pending') + '</span>';
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function shortText(value, max = 88) {
+      const text = String(value ?? '');
+      return text.length > max ? text.slice(0, max - 1) + '…' : text;
+    }
+
+    function listText(value) {
+      if (Array.isArray(value)) {
+        return value.length ? value.join(' · ') : '';
+      }
+      return String(value ?? '');
+    }
+
+    async function copyText(value, fallbackTextareaId) {
+      const text = String(value ?? '');
+      if (!text) {
+        return false;
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+          return true;
+        }
+      } catch (err) {
+        // Fall back to manual selection below.
+      }
+      const textarea = fallbackTextareaId ? document.getElementById(fallbackTextareaId) : null;
+      if (textarea) {
+        textarea.focus();
+        textarea.select();
+        try {
+          return document.execCommand('copy');
+        } catch (err) {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    function renderDashboard() {
+      const data = state.dashboard || {};
+      document.getElementById('pendingCount').textContent = data.pending_approvals_count ?? 0;
+      document.getElementById('failedCount').textContent = data.failed_items_count ?? 0;
+      document.getElementById('executedCount').textContent = (data.recent_executed_items || []).length;
+      document.getElementById('planCount').textContent = (data.recent_plan_summaries || []).length;
+
+      const driftBanner = document.getElementById('driftBanner');
+      const recoveryBanner = document.getElementById('recoveryBanner');
+      const driftSignals = data.drift_signals || [];
+      if (data.drift_warning && driftSignals.length) {
+        driftBanner.style.display = 'block';
+        driftBanner.textContent = 'Drift warning: ' + driftSignals.join(' · ') + '. Use report drift or recover prompt --drift.';
+      } else {
+        driftBanner.style.display = 'none';
+        driftBanner.textContent = '';
+      }
+
+      const recoverySummary = data.recommended_recovery_summary || '';
+      const recoveryMode = data.recommended_recovery_mode || '';
+      if (recoverySummary) {
+        recoveryBanner.style.display = 'block';
+        recoveryBanner.textContent = 'Recommended recovery prompt (' + recoveryMode + '): ' + recoverySummary + '. Open a failed item for the full prompt.';
+      } else {
+        recoveryBanner.style.display = 'none';
+        recoveryBanner.textContent = '';
+      }
+
+      const recentExecuted = document.getElementById('recentExecuted');
+      recentExecuted.innerHTML = '';
+      (data.recent_executed_items || []).forEach((item) => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <div class="actions" style="justify-content: space-between;">
+            <strong>${escapeHtml(item.title || item.id || item.task_id || 'item')}</strong>
+            ${badge(item.status)}
+          </div>
+          <div class="muted small">${escapeHtml(item.item_type || '')} ${escapeHtml(item.task_id || '')}</div>
+          <div class="small">${escapeHtml(shortText(item.latest_result?.stderr || item.latest_result?.stdout || item.decision_reason || ''))}</div>
+        `;
+        recentExecuted.appendChild(div);
+      });
+
+      const recentPlans = document.getElementById('recentPlans');
+      recentPlans.innerHTML = '';
+      (data.recent_plan_summaries || []).forEach((plan) => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `
+          <div class="actions" style="justify-content: space-between;">
+            <strong>${escapeHtml(plan.task_id)}</strong>
+            ${badge(plan.latest_status)}
+          </div>
+          <div class="muted small">${escapeHtml(plan.plan_goal || '')}</div>
+          <div class="small">${escapeHtml(plan.step_count || 0)} steps · pending ${plan.pending_count || 0} · executed ${plan.executed_count || 0} · failed ${plan.failed_count || 0}</div>
+        `;
+        recentPlans.appendChild(div);
+      });
+
+      const recentFailed = document.getElementById('recentFailed');
+      recentFailed.innerHTML = '';
+      (data.failed_items_summary || []).forEach((item) => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        const recoveryText = item.recovery_prompt?.prompt_text || item.recommended_recovery_prompt || '';
+        const failureSummary = item.failure_summary || item.failure_detail?.summary || item.decision_reason || '';
+        const likelyCause = item.likely_cause || item.failure_detail?.likely_causes?.[0] || '';
+        const affectedFiles = listText(item.affected_files || item.failure_detail?.affected_files || []);
+        div.innerHTML = `
+          <div class="actions" style="justify-content: space-between;">
+            <strong>${escapeHtml(item.title || item.id || item.task_id || 'item')}</strong>
+            ${badge(item.status)}
+          </div>
+          <div class="muted small">${escapeHtml(item.item_type || '')} ${escapeHtml(item.task_id || '')}</div>
+          <div class="small"><strong>Summary:</strong> ${escapeHtml(shortText(failureSummary || item.latest_result?.stderr || item.latest_result?.stdout || item.decision_reason || ''))}</div>
+          <div class="small"><strong>Cause:</strong> ${escapeHtml(shortText(likelyCause || 'unknown'))}</div>
+          <div class="small"><strong>Files:</strong> ${escapeHtml(shortText(affectedFiles || 'none'))}</div>
+          <div class="small muted">Build LLM Retry Prompt opens the detail panel. This does not auto-run or auto-approve.</div>
+          <div class="row-actions" style="margin-top: 4px;">
+            <button class="ghost" data-action="detail">Build LLM Retry Prompt</button>
+            <button class="primary" data-action="copy">Copy Recovery Prompt</button>
+          </div>
+        `;
+        div.querySelector('[data-action="detail"]').addEventListener('click', () => loadApprovalDetail(item.id));
+        div.querySelector('[data-action="copy"]').addEventListener('click', async () => {
+          const ok = await copyText(recoveryText || item.recommended_recovery_summary || item.recommended_llm_prompt || failureSummary, null);
+          if (!ok) {
+            alert('Clipboard copy failed; open the item detail and copy the recovery prompt from the textarea.');
+          }
+        });
+        recentFailed.appendChild(div);
+      });
+    }
+
+    function renderApprovals() {
+      const tbody = document.getElementById('approvalsBody');
+      tbody.innerHTML = '';
+      (state.approvals || []).forEach((item) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(item.id || '')}</td>
+          <td>${escapeHtml(item.item_type || '')}</td>
+          <td>${badge(item.status || 'pending')}</td>
+          <td>${escapeHtml(item.target || '')}</td>
+          <td>${escapeHtml(fmtTime(item.created_at))}</td>
+          <td>${escapeHtml(fmtTime(item.decided_at))}</td>
+          <td>
+            <div class="row-actions">
+              <button class="good" data-action="approve">Approve</button>
+              <button class="danger" data-action="reject">Reject</button>
+              <button class="ghost" data-action="detail">Detail</button>
+            </div>
+          </td>
+        `;
+        tr.querySelector('[data-action="approve"]').addEventListener('click', () => approveApproval(item));
+        tr.querySelector('[data-action="reject"]').addEventListener('click', () => rejectApproval(item));
+        tr.querySelector('[data-action="detail"]').addEventListener('click', () => loadApprovalDetail(item.id));
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderPlans() {
+      const tbody = document.getElementById('plansBody');
+      tbody.innerHTML = '';
+      (state.plans || []).forEach((plan) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${escapeHtml(plan.task_id || '')}</td>
+          <td>${escapeHtml(shortText(plan.plan_goal || plan.summary?.plan_goal || ''))}</td>
+          <td>${escapeHtml(plan.step_count || 0)}</td>
+          <td>${badge(plan.latest_status || 'pending')}</td>
+          <td>
+            <div class="row-actions">
+              <button class="ghost" data-action="detail">Detail</button>
+            </div>
+          </td>
+        `;
+        tr.querySelector('[data-action="detail"]').addEventListener('click', () => loadPlanDetail(plan.task_id));
+        tbody.appendChild(tr);
+      });
+    }
+
+    function setDetail(targetId, title, data) {
+      const target = document.getElementById(targetId);
+      target.innerHTML = '';
+      const lines = [];
+      lines.push(title);
+      lines.push('');
+      lines.push(JSON.stringify(data, null, 2));
+      target.textContent = lines.join('\n');
+    }
+
+    async function loadApprovalDetail(itemId) {
+      try {
+        const data = await fetchJson('/api/approvals?id=' + encodeURIComponent(itemId));
+        state.selectedApprovalId = itemId;
+        const failureDetail = data.failure_detail || {};
+        const recoveryPrompt = data.recovery_prompt || {};
+        const latestResult = data.latest_result || null;
+        const promptText = recoveryPrompt.prompt_text || data.recommended_recovery_prompt || '';
+        const affectedFiles = listText(data.affected_files || failureDetail.affected_files || []);
+        const stdout = data.stdout || latestResult?.stdout || '';
+        const stderr = data.stderr || latestResult?.stderr || '';
+        const exitCode = data.exit_code ?? latestResult?.exit_code ?? '';
+
+        const detail = document.getElementById('approvalDetail');
+        detail.innerHTML = '';
+
+        const stack = document.createElement('div');
+        stack.className = 'stack';
+
+        const header = document.createElement('div');
+        header.className = 'info-card';
+        header.innerHTML = `
+          <div class="actions" style="justify-content: space-between; align-items: start;">
+            <div>
+              <div><strong>${escapeHtml(data.id || '')}</strong></div>
+              <div class="muted small">${escapeHtml(data.item_type || '')} · ${escapeHtml(data.status || '')}</div>
+            </div>
+            ${badge(data.status || 'pending')}
+          </div>
+          <div class="small"><strong>Task:</strong> ${escapeHtml(data.task_id || '')}</div>
+          <div class="small"><strong>Target:</strong> ${escapeHtml(data.target || '')}</div>
+          <div class="small"><strong>Created:</strong> ${escapeHtml(fmtTime(data.created_at))}</div>
+          <div class="small"><strong>Decided:</strong> ${escapeHtml(fmtTime(data.decided_at))}</div>
+          <div class="small"><strong>Decision:</strong> ${escapeHtml(data.decision_reason || '—')}</div>
+        `;
+        stack.appendChild(header);
+
+        if (failureDetail && Object.keys(failureDetail).length) {
+          const failureCard = document.createElement('div');
+          failureCard.className = 'info-card';
+          failureCard.innerHTML = `
+            <div class="info-label">Failure Detail</div>
+            <div class="info-value"><strong>${escapeHtml(failureDetail.summary || data.failure_summary || 'No failure summary available')}</strong></div>
+            <div class="small"><strong>Likely cause:</strong> ${escapeHtml(shortText(data.likely_cause || (failureDetail.likely_causes || [])[0] || 'unknown'))}</div>
+            <div class="small"><strong>Affected files:</strong> ${escapeHtml(affectedFiles || 'none')}</div>
+            <div class="small"><strong>Recommended human action:</strong> ${escapeHtml(shortText(data.recommended_human_action || failureDetail.recommended_human_action || ''))}</div>
+            <div class="small"><strong>Exit code:</strong> ${escapeHtml(String(exitCode || '—'))}</div>
+            <div class="small"><strong>stdout:</strong> ${escapeHtml(shortText(stdout || '—', 180))}</div>
+            <div class="small"><strong>stderr:</strong> ${escapeHtml(shortText(stderr || '—', 180))}</div>
+            <div class="small"><strong>Next prompt:</strong> ${escapeHtml(shortText(data.recommended_llm_prompt || failureDetail.recommended_llm_prompt || ''))}</div>
+          `;
+          stack.appendChild(failureCard);
+        }
+
+        const recoveryCard = document.createElement('div');
+        recoveryCard.className = 'info-card';
+        recoveryCard.innerHTML = `
+          <div class="info-label">Recovery Prompt</div>
+          <div class="info-value">${escapeHtml(recoveryPrompt.summary || data.recommended_recovery_summary || 'Recovery prompt available for manual review.')}</div>
+          <div class="small muted">This panel contains the full recovery prompt text for manual copy. This does not auto-run or auto-approve.</div>
+          <textarea id="recoveryPromptTextArea" class="prompt-box" readonly>${escapeHtml(promptText || 'No recovery prompt available.')}</textarea>
+          <div class="row-actions">
+            <button class="primary" data-action="copy-recovery">Copy Recovery Prompt</button>
+          </div>
+        `;
+        stack.appendChild(recoveryCard);
+
+        const rawCard = document.createElement('div');
+        rawCard.className = 'info-card';
+        rawCard.innerHTML = `
+          <div class="info-label">Raw Payload</div>
+          <pre>${escapeHtml(JSON.stringify({
+            id: data.id,
+            task_id: data.task_id,
+            item_type: data.item_type,
+            status: data.status,
+            target: data.target,
+            decided_by: data.decided_by,
+            decision_reason: data.decision_reason,
+            latest_result: latestResult,
+          }, null, 2))}</pre>
+        `;
+        stack.appendChild(rawCard);
+
+        detail.appendChild(stack);
+        const copyBtn = detail.querySelector('[data-action="copy-recovery"]');
+        if (copyBtn) {
+          copyBtn.addEventListener('click', async () => {
+            const ok = await copyText(promptText, 'recoveryPromptTextArea');
+            if (!ok) {
+              alert('Clipboard copy failed. Select the recovery prompt textarea and copy it manually.');
+            }
+          });
+        }
+      } catch (err) {
+        document.getElementById('approvalDetail').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function loadPlanDetail(taskId) {
+      try {
+        const data = await fetchJson('/api/plans?id=' + encodeURIComponent(taskId));
+        state.selectedPlanId = taskId;
+        const detail = {
+          task_id: data.task_id,
+          plan_goal: data.plan_goal,
+          step_count: data.step_count,
+          summary: data.summary,
+          steps: (data.steps || []).map((step) => ({
+            step_index: step.step_index,
+            title: step.title,
+            task_type: step.task_type,
+            status: step.status,
+            approved_by: step.approved_by,
+            decided_at: fmtTime(step.decided_at),
+            decision_reason: step.decision_reason,
+            result: step.result,
+          })),
+        };
+        document.getElementById('planDetail').innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'stack';
+        const header = document.createElement('div');
+        header.innerHTML = `
+          <div class="actions" style="justify-content: space-between; align-items: start;">
+            <div>
+              <div><strong>${escapeHtml(detail.task_id)}</strong></div>
+              <div class="muted small">${escapeHtml(detail.plan_goal || '')}</div>
+            </div>
+            <span class="pill">${escapeHtml(detail.step_count)} steps</span>
+          </div>
+        `;
+        container.appendChild(header);
+
+        const table = document.createElement('table');
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th>step</th>
+              <th>title</th>
+              <th>status</th>
+              <th>actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        `;
+        const tbody = table.querySelector('tbody');
+        (data.steps || []).forEach((step) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${escapeHtml(step.step_index)}</td>
+            <td>
+              <div><strong>${escapeHtml(step.title || '')}</strong></div>
+              <div class="muted small">${escapeHtml(step.description || '')}</div>
+            </td>
+            <td>${badge(step.status || 'pending')}</td>
+            <td>
+              <div class="row-actions">
+                <button class="good" data-action="approve">Approve</button>
+                <button class="danger" data-action="reject">Reject</button>
+                <button class="primary" data-action="run">Run</button>
+              </div>
+            </td>
+          `;
+          tr.querySelector('[data-action="approve"]').addEventListener('click', () => approvePlanStep(detail.task_id, step.step_index));
+          tr.querySelector('[data-action="reject"]').addEventListener('click', () => rejectPlanStep(detail.task_id, step.step_index));
+          tr.querySelector('[data-action="run"]').addEventListener('click', () => runPlanStep(detail.task_id, step.step_index));
+          tbody.appendChild(tr);
+        });
+        container.appendChild(table);
+
+        const resultBlock = document.createElement('div');
+        resultBlock.innerHTML = '<h3 style="margin:0 0 8px;font-size:14px;">Plan JSON</h3><pre></pre>';
+        resultBlock.querySelector('pre').textContent = JSON.stringify(detail, null, 2);
+        container.appendChild(resultBlock);
+        document.getElementById('planDetail').appendChild(container);
+      } catch (err) {
+        document.getElementById('planDetail').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    async function approveApproval(item) {
+      try {
+        await fetchJson('/api/approvals/approve', {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace: workspaceInput.value.trim() || '.',
+            item_id: item.id,
+            approved_by: 'dashboard'
+          })
+        });
+        await refreshAll();
+        if (item.id) await loadApprovalDetail(item.id);
+      } catch (err) {
+        alert('Approve failed: ' + err.message);
+      }
+    }
+
+    async function rejectApproval(item) {
+      try {
+        await fetchJson('/api/approvals/reject', {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace: workspaceInput.value.trim() || '.',
+            item_id: item.id,
+            rejected_by: 'dashboard',
+            reason: 'dashboard_reject'
+          })
+        });
+        await refreshAll();
+        if (item.id) await loadApprovalDetail(item.id);
+      } catch (err) {
+        alert('Reject failed: ' + err.message);
+      }
+    }
+
+    async function approvePlanStep(taskId, stepIndex) {
+      try {
+        await fetchJson('/api/plans/approve-step', {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace: workspaceInput.value.trim() || '.',
+            task_id: taskId,
+            step: stepIndex,
+            approved_by: 'dashboard'
+          })
+        });
+        await refreshAll();
+        await loadPlanDetail(taskId);
+      } catch (err) {
+        alert('Approve step failed: ' + err.message);
+      }
+    }
+
+    async function rejectPlanStep(taskId, stepIndex) {
+      try {
+        await fetchJson('/api/plans/reject-step', {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace: workspaceInput.value.trim() || '.',
+            task_id: taskId,
+            step: stepIndex,
+            rejected_by: 'dashboard',
+            reason: 'dashboard_reject'
+          })
+        });
+        await refreshAll();
+        await loadPlanDetail(taskId);
+      } catch (err) {
+        alert('Reject step failed: ' + err.message);
+      }
+    }
+
+    async function runPlanStep(taskId, stepIndex) {
+      try {
+        await fetchJson('/api/plans/run-step', {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace: workspaceInput.value.trim() || '.',
+            task_id: taskId,
+            step: stepIndex,
+            approved_by: 'dashboard'
+          })
+        });
+        await refreshAll();
+        await loadPlanDetail(taskId);
+      } catch (err) {
+        alert('Run step failed: ' + err.message);
+      }
+    }
+
+    async function refreshAll() {
+      saveSettings();
+      try {
+        const dashboard = await fetchJson('/api/dashboard');
+        state.dashboard = dashboard;
+        state.approvals = await fetchJson('/api/approvals?status=pending&limit=20');
+        state.plans = await fetchJson('/api/plans?limit=20');
+        renderDashboard();
+        renderApprovals();
+        renderPlans();
+      } catch (err) {
+        document.getElementById('approvalDetail').textContent = 'Error: ' + err.message;
+        document.getElementById('planDetail').textContent = 'Error: ' + err.message;
+      }
+    }
+
+    refreshBtn.addEventListener('click', refreshAll);
+    workspaceInput.addEventListener('change', refreshAll);
+    tokenInput.addEventListener('change', refreshAll);
+    loadSettings();
+    refreshAll();
   </script>
 </body>
 </html>

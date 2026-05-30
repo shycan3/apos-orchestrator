@@ -59,6 +59,17 @@ def _read_json_from_environ(environ) -> Tuple[dict, int]:
     return payload, 200
 
 
+def _resolve_item_id(payload: dict) -> str:
+    item_id = str(payload.get('item_id') or payload.get('id') or payload.get('patch_id') or '').strip()
+    if item_id:
+        return item_id
+    task_id = str(payload.get('task_id') or '').strip()
+    step = payload.get('step')
+    if task_id and step is not None:
+        return f'{task_id}:step:{int(step)}'
+    return ''
+
+
 def app(environ, start_response):
     path = environ.get('PATH_INFO', '/')
     method = environ.get('REQUEST_METHOD', 'GET')
@@ -111,14 +122,33 @@ def app(environ, start_response):
         workspace = payload.get('workspace')
         step = payload.get('step', 0)
         approved_by = payload.get('approved_by')
+        item_id = _resolve_item_id(payload)
 
-        if not task_id or not workspace:
+        if not item_id and (not task_id or not workspace):
             start_response('400 Bad Request', [('Content-Type', 'application/json')])
-            return [json.dumps({'error': 'task_id_and_workspace_required'}).encode('utf-8')]
+            return [json.dumps({'error': 'task_id_workspace_or_item_id_required'}).encode('utf-8')]
+        if item_id and not workspace:
+            start_response('400 Bad Request', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'workspace_required_for_item_id'}).encode('utf-8')]
 
         try:
             orch = Orchestrator(workspace_root=workspace, history_db_path=f"{workspace}/.apos/history.sqlite3")
-            result = orch.execute_plan_step(task_id, int(step), approved_by=approved_by)
+            if task_id and workspace and payload.get('step') is not None:
+                orch.approve_plan_step(task_id, int(step), approved_by=approved_by, reason=payload.get('reason'))
+                result = orch.run_plan_step(task_id, int(step), approved_by=approved_by, force=bool(payload.get('force')))
+            else:
+                item = orch.approve_pending_approval(item_id, approved_by=approved_by, reason=payload.get('reason'))
+                if not item:
+                    try:
+                        orch.stop()
+                    except Exception:
+                        pass
+                    start_response('404 Not Found', [('Content-Type', 'application/json')])
+                    return [json.dumps({'error': 'approval_item_not_found', 'id': item_id}).encode('utf-8')]
+                result = {
+                    'type': 'approval_recorded',
+                    'item': item,
+                }
             # close recorder
             try:
                 orch.stop()
@@ -126,6 +156,79 @@ def app(environ, start_response):
                 pass
             start_response('200 OK', [('Content-Type', 'application/json')])
             return [json.dumps(result, ensure_ascii=False).encode('utf-8')]
+        except Exception as exc:
+            start_response('500 Internal Server Error', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'internal_error', 'message': str(exc)}).encode('utf-8')]
+
+    if path == '/reject' and method == 'POST':
+        try:
+            length = int(environ.get('CONTENT_LENGTH') or 0)
+        except Exception:
+            length = 0
+        raw_body = environ['wsgi.input'].read(length) if length else b''
+
+        if REQUIRED_TOKEN:
+            supplied_token = environ.get('HTTP_X_APOS_APPROVE_TOKEN')
+            if supplied_token and supplied_token == REQUIRED_TOKEN:
+                auth_ok = True
+            else:
+                ts = environ.get('HTTP_X_APOS_TIMESTAMP')
+                sig = environ.get('HTTP_X_APOS_SIGNATURE')
+                auth_ok = False
+                if ts and sig:
+                    try:
+                        ts_i = int(ts)
+                        now = int(time.time())
+                        if abs(now - ts_i) <= SIGNATURE_WINDOW:
+                            msg = ts.encode('utf-8') + b'.' + raw_body
+                            expected = hmac.new(REQUIRED_TOKEN.encode('utf-8'), msg, hashlib.sha256).hexdigest()
+                            if hmac.compare_digest(expected, sig):
+                                auth_ok = True
+                    except Exception:
+                        auth_ok = False
+
+            if not auth_ok:
+                start_response('401 Unauthorized', [('Content-Type', 'application/json')])
+                return [json.dumps({'error': 'unauthorized'}).encode('utf-8')]
+
+        if not raw_body:
+            start_response('400 Bad Request', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'invalid_json'}).encode('utf-8')]
+        try:
+            payload = json.loads(raw_body.decode('utf-8'))
+        except Exception:
+            start_response('400 Bad Request', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'invalid_json'}).encode('utf-8')]
+
+        item_id = _resolve_item_id(payload)
+        task_id = payload.get('task_id')
+        workspace = payload.get('workspace')
+        step = payload.get('step', 0)
+        if not item_id and (not task_id or not workspace):
+            start_response('400 Bad Request', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'task_id_workspace_or_item_id_required'}).encode('utf-8')]
+        if item_id and not workspace:
+            start_response('400 Bad Request', [('Content-Type', 'application/json')])
+            return [json.dumps({'error': 'workspace_required_for_item_id'}).encode('utf-8')]
+
+        try:
+            orch = Orchestrator(workspace_root=workspace, history_db_path=f"{workspace}/.apos/history.sqlite3")
+            if task_id and workspace and payload.get('step') is not None:
+                item_id = f'{task_id}:step:{int(step)}'
+            item = orch.reject_pending_approval(item_id, rejected_by=payload.get('rejected_by') or payload.get('approved_by'), reason=payload.get('reason'))
+            if not item:
+                try:
+                    orch.stop()
+                except Exception:
+                    pass
+                start_response('404 Not Found', [('Content-Type', 'application/json')])
+                return [json.dumps({'error': 'approval_item_not_found', 'id': item_id}).encode('utf-8')]
+            try:
+                orch.stop()
+            except Exception:
+                pass
+            start_response('200 OK', [('Content-Type', 'application/json')])
+            return [json.dumps({'type': 'approval_recorded', 'item': item}, ensure_ascii=False).encode('utf-8')]
         except Exception as exc:
             start_response('500 Internal Server Error', [('Content-Type', 'application/json')])
             return [json.dumps({'error': 'internal_error', 'message': str(exc)}).encode('utf-8')]

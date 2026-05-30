@@ -23,10 +23,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
+from apos_core.recorder import Recorder
 
 try:
-    import websockets
-    from websockets.server import WebSocketServerProtocol
+    from websockets.asyncio.server import ServerConnection, serve
 except ImportError:
     print(
         "Missing dependency: websockets\nInstall with:\n  python -m pip install websockets",
@@ -86,6 +86,7 @@ class PendingPatch:
 
 PENDING_PATCHES: Dict[str, PendingPatch] = {}
 COMMITTED_PATCH_IDS: Dict[str, float] = {}
+PROJECT_RECORDERS: Dict[str, Recorder] = {}
 
 
 def now_iso() -> str:
@@ -344,6 +345,15 @@ def cleanup_expired_patches() -> None:
         COMMITTED_PATCH_IDS.pop(patch_id, None)
 
 
+def get_project_recorder(project_root: Path) -> Recorder:
+    key = str(project_root.resolve())
+    recorder = PROJECT_RECORDERS.get(key)
+    if recorder is None:
+        recorder = Recorder(db_path=project_root / ".apos" / "history.sqlite3")
+        PROJECT_RECORDERS[key] = recorder
+    return recorder
+
+
 async def handle_propose_patch(data: Dict[str, Any]) -> str:
     cleanup_expired_patches()
 
@@ -415,6 +425,30 @@ async def handle_propose_patch(data: Dict[str, Any]) -> str:
         created_at=asyncio.get_running_loop().time(),
     )
 
+    try:
+        recorder = get_project_recorder(req.project_root)
+        recorder.record_approval_item(
+            req.patch_id,
+            req.patch_id,
+            "bridge_patch",
+            req.target,
+            {
+                "patch_id": req.patch_id,
+                "project_root": str(req.project_root),
+                "target": req.target,
+                "language": req.language,
+                "content": req.content,
+                "sha256": req.sha256,
+            },
+            patch_id=req.patch_id,
+            workspace_root=str(req.project_root),
+            target=req.target,
+            status="pending",
+            meta={"zone": zone},
+        )
+    except Exception:
+        pass
+
     return json_response(
         {
             "type": "validation_passed",
@@ -438,6 +472,17 @@ async def handle_commit_patch(data: Dict[str, Any]) -> str:
             patch_id=patch_id,
             error_kind="patch_not_found",
             message="No validated pending patch found for patch_id",
+            retry_allowed=False,
+        )
+
+    recorder = get_project_recorder(pending.project_root)
+    queue_item = recorder.get_approval_item(patch_id)
+    if queue_item and queue_item.get("status") == "rejected":
+        PENDING_PATCHES.pop(patch_id, None)
+        return error_response(
+            patch_id=patch_id,
+            error_kind="patch_rejected",
+            message="Pending patch was rejected and cannot be committed",
             retry_allowed=False,
         )
 
@@ -478,6 +523,16 @@ async def handle_commit_patch(data: Dict[str, Any]) -> str:
         pending.target_path.write_text(pending.content, encoding="utf-8", newline="\n")
         PENDING_PATCHES.pop(patch_id, None)
         COMMITTED_PATCH_IDS[patch_id] = asyncio.get_running_loop().time()
+        try:
+            recorder.update_approval_item_status(
+                patch_id,
+                "executed",
+                decided_by=str(data.get("approved_by") or data.get("decided_by") or ""),
+                decision_reason=None,
+                meta={"committed": True},
+            )
+        except Exception:
+            pass
 
         return json_response(
             {
@@ -488,12 +543,60 @@ async def handle_commit_patch(data: Dict[str, Any]) -> str:
         )
     except Exception as exc:
         PENDING_PATCHES.pop(patch_id, None)
+        try:
+            recorder.update_approval_item_status(
+                patch_id,
+                "failed",
+                decided_by=str(data.get("approved_by") or data.get("decided_by") or ""),
+                decision_reason=str(exc),
+                meta={"commit_failed": True},
+            )
+        except Exception:
+            pass
         return error_response(
             patch_id=patch_id,
             error_kind="commit_failed",
             message=f"{type(exc).__name__}: {exc}",
             retry_allowed=False,
         )
+
+
+async def handle_reject_patch(data: Dict[str, Any]) -> str:
+    cleanup_expired_patches()
+    patch_id = str(data.get("patch_id", "")).strip()
+    if not patch_id:
+        return error_response(None, "bad_request", "patch_id is required", retry_allowed=False)
+
+    pending = PENDING_PATCHES.get(patch_id)
+    if not pending:
+        return error_response(
+            patch_id=patch_id,
+            error_kind="patch_not_found",
+            message="No validated pending patch found for patch_id",
+            retry_allowed=False,
+        )
+
+    recorder = get_project_recorder(pending.project_root)
+    try:
+        recorder.update_approval_item_status(
+            patch_id,
+            "rejected",
+            decided_by=str(data.get("rejected_by") or data.get("approved_by") or ""),
+            decision_reason=str(data.get("reason") or data.get("decision_reason") or ""),
+            meta={"rejected": True},
+        )
+    except Exception:
+        pass
+
+    PENDING_PATCHES.pop(patch_id, None)
+    return json_response(
+        {
+            "type": "rejected",
+            "patch_id": patch_id,
+            "target": pending.target,
+            "message": "Pending patch was rejected and removed from memory.",
+        }
+    )
 
 
 async def handle_message(message: str) -> str:
@@ -510,6 +613,8 @@ async def handle_message(message: str) -> str:
         return await handle_propose_patch(data)
     if message_type == "commit_patch":
         return await handle_commit_patch(data)
+    if message_type == "reject_patch":
+        return await handle_reject_patch(data)
     if message_type == "ping":
         return json_response(
             {
@@ -527,7 +632,7 @@ async def handle_message(message: str) -> str:
     )
 
 
-async def websocket_handler(websocket: WebSocketServerProtocol) -> None:
+async def websocket_handler(websocket: ServerConnection) -> None:
     remote = websocket.remote_address
     host = remote[0] if isinstance(remote, tuple) and remote else ""
     if host not in LOCAL_HOSTS:
@@ -546,7 +651,7 @@ async def run_server(host: str, port: int) -> None:
     if host not in LOCAL_HOSTS:
         raise ValueError("APOS server may bind to localhost only")
 
-    async with websockets.serve(websocket_handler, host, port, max_size=MAX_CONTENT_BYTES * 2):
+    async with serve(websocket_handler, host, port, max_size=MAX_CONTENT_BYTES * 2):
         print(f"APOS local websocket server listening on ws://{host}:{port}")
         await asyncio.Future()
 
