@@ -1,5 +1,7 @@
 # APOS Project Overview
 
+> Current baseline: APOS v0.3. Post-v0.3 runtime and bridge work is being separated into follow-up commits and future branch lines.
+
 ## 1. 문서 목적
 
 이 문서는 APOS 프로젝트의 목적, 현재 상태, 핵심 구조, 안전 원칙, 한계, 앞으로의 개발 방향을 정리한 기준 문서다.
@@ -10,6 +12,15 @@ APOS는 웹 기반 LLM, 예를 들어 ChatGPT나 Gemini가 로컬 프로젝트�
 
 이 문서는 다음 목적을 가진다.
 
+현재 canonical 기준선은 APOS v0.3이며, 아래 범위는 현재 기준선과 그 직전 안정화 흐름을 함께 설명하기 위한 요약이다.
+
+- validate-only / preview_patch / apos-patch Bridge Flow
+- approval_items 기반 승인 큐
+- Context Pack, Prompt Builder, Plan Step, Dashboard, Failure / Drift Report
+- 명확한 안전 경계와 현재 한계
+
+현재 한계는 [docs/KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md)와 README의 Known Limitations 섹션을 기준으로 본다.
+
 HTTP approve endpoint security:
 
 The lightweight HTTP endpoint supports an optional simple token-based authentication. If the environment variable `APOS_APPROVE_TOKEN` is set when starting `server/approve_endpoint.py`, the endpoint requires requests to include the header `X-APOS-Approve-Token: <token>`. This provides basic protection for local or network-exposed approval endpoints. For production use, place the endpoint behind a secure proxy or add stronger authentication.
@@ -19,7 +30,11 @@ For improved security the endpoint also supports a timestamped HMAC signature sc
 1. 처음 보는 사람이 APOS가 어떤 프로젝트인지 빠르게 이해할 수 있게 한다.
 2. 개발자가 APOS의 핵심 철학과 안전 기준을 놓치지 않게 한다.
 3. ChatGPT, Gemini, Codex, Claude Code 등 다른 AI에게 프로젝트 방향을 설명할 때 기준 문서로 사용한다.
-4. 앞으로 구현할 Search & Replace, Context Pack, 브라우저 자동 감지, 자동 실행, 자동 루프 기능의 설계 기준으로 사용한다.
+4. 앞으로 추가될 Web Controller, 외부 브라우저 자동화, 자동 루프 같은 experimental future 기능의 설계 기준으로 사용한다.
+
+Web Controller에 대한 분리된 설계 메모는 [docs/WEB_CONTROLLER_EXPERIMENT.md](WEB_CONTROLLER_EXPERIMENT.md)를 기준으로 본다. 문서 안의 `v0.1`, `v0.2`, `v0.3` 단계 구분은 현재 canonical version line이 아니라 earlier milestone과 evolution 문맥으로 읽어야 한다. 이 문맥에서 `v0.3`은 현재 release baseline이고, `v0.4`는 released baseline이 아니라 candidate/future direction이다.
+
+아래의 browser extension 단계 구분과 roadmap 번호는 현재 제품 버전명이 아니라 historical design stages와 future planning 메모로 읽어야 한다.
 
 ---
 
@@ -557,13 +572,19 @@ Context Pack은 웹 LLM에게 현재 로컬 프로젝트 상태를 안전하게 
 Context Pack은 다음 정보를 포함한다.
 
 ```text
-- 프로젝트 루트
-- 허용된 작업 경로
-- 제외된 보호 경로
-- 현재 주요 파일 목록
-- 최근 task/result 요약
-- 현재 안전 정책 요약
-- 웹 LLM에게 줄 주의사항
+- project_name
+- project_root 표시 여부
+- generated_at
+- allowed_roots
+- protected_roots
+- recent_worklog_summary
+- available_flows
+- approval_queue_summary
+- recent_history_summary
+- relevant_files
+- file_summaries
+- known_warnings
+- next_recommended_actions
 ```
 
 Context Pack은 전체 프로젝트를 덤프하는 기능이 아니다.
@@ -604,10 +625,13 @@ src/
 app/
 cli/
 apos_core/
+server/
+extension/
 tests/
 docs/
 README.md
 examples/
+project_updates/
 ```
 
 권장 제한:
@@ -622,9 +646,9 @@ max_total_chars = 12000
 예상 명령:
 
 ```powershell
-python cli/context_pack.py
+python cli/apos.py context build --json
+python cli/apos.py context inspect --format markdown
 python cli/context_pack.py --json
-python cli/context_pack.py --max-files 80
 ```
 
 Context Pack은 브라우저 확장보다 먼저 만들어도 유용하고, 나중에 브라우저 확장/자동 루프에도 그대로 재사용할 수 있다.
@@ -814,13 +838,31 @@ build/
 Context Pack은 다음 정보를 포함한다.
 
 ```text
-- 프로젝트 루트
-- 허용된 작업 경로
-- 제외된 보호 경로
-- 현재 주요 파일 목록
-- 최근 task/result 요약
-- 안전 정책 요약
-- 웹 LLM에게 줄 주의사항
+- project_name
+- project_root 표시 여부
+- generated_at
+- allowed_roots
+- protected_roots
+- recent_worklog_summary
+- available_flows
+- approval_queue_summary
+- recent_history_summary
+- relevant_files
+- file_summaries
+- known_warnings
+- next_recommended_actions
+```
+
+Markdown Context Pack 출력은 ChatGPT/Gemini에 바로 붙여넣기 쉽게 다음 섹션을 사용한다.
+
+```text
+Project Snapshot
+Current Safe Working Scope
+Recent Changes
+Approval Queue Summary
+Relevant Files
+Known Warnings
+Recommended Next Prompt
 ```
 
 권장 제한:
@@ -839,6 +881,8 @@ max_total_chars = 12000
 복잡한 작업을 한 번에 실행하지 않고 단계별 계획으로 나누기 위한 기능이다.
 
 현재는 `plan_only` task type의 기본 검증과 계획 요약 반환 경로를 구현했다.
+
+표준 step 조작 경로는 `cli/apos.py plans`이다. 이 CLI는 `list`, `show`, `steps`, `approve-step`, `reject-step`, `run-step`을 제공하며, `PlanStepManager` 기준으로 step 상태를 `pending / approved / rejected / running / executed / failed / skipped`로 관리한다.
 
 또한 **Plan Step 실행용 CLI**(`cli/plan_step.py`)를 추가하여 `meta.plan_steps` 내부의 특정 단계만 선택적으로 실행할 수 있다. 이 CLI는 선택한 단계의 패치를 동기적으로 적용하고(패치 정책 준수), 첫 명령을 실행한 뒤 `result_envelope`를 기록한다.
 
@@ -867,7 +911,9 @@ Plan Only Mode는 Auto Loop의 안정성을 높이는 기반 기능이다.
 
 추가 워크플로우 — 승인 기반 실행:
 
-Plan Only Mode는 수동 혹은 반자동 승인 워크플로우를 지원하도록 확장할 수 있다. 두 가지 보조 도구를 제공합니다:
+Plan Only Mode는 수동 혹은 반자동 승인 워크플로우를 지원하도록 확장할 수 있다. 표준 인터페이스와 보조 도구는 다음과 같다:
+
+- `cli/apos.py plans`: 기록된 `plan_only` 작업의 list/show/steps/approve-step/reject-step/run-step를 제공하는 표준 CLI
 
 - `cli/plan_step.py`: 파일 기반 `plan_only` JSON에서 특정 단계를 즉시 실행(디버그용).
 - `cli/plan_approve.py`: 이미 `workspace/.apos/history.sqlite3`에 기록된 `plan_only` 작업의 `task_id`를 조회하여 특정 단계를 승인·실행(감사 기록용).

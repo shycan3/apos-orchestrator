@@ -1,16 +1,53 @@
-# APOS v3.2 + Bridge Protocol Service Overview
+# APOS Service Overview
 
 작성일: 2026-05-21
 
 ## 서비스 한 줄 정의
 
-APOS v3.2 + Bridge Protocol은 ChatGPT나 Gemini 같은 웹 기반 LLM의 코드 제안을 로컬 프로젝트 파일로 연결하되, 그 제안을 절대 바로 신뢰하지 않고 로컬 검증 서버와 인간 승인 단계를 통과하게 만드는 안전한 파일 기반 협업 서비스다.
+이 문서는 APOS v0.3 기준선과 그 이후 이미 커밋된 runtime / bridge 확장을 함께 설명하는 현재 서비스 개요다.
+
+`Bridge Protocol`은 APOS 전체 버전명이 아니라 browser-local integration layer를 가리키는 subsystem 이름으로 사용한다.
+
+APOS는 ChatGPT나 Gemini 같은 웹 기반 LLM의 코드 제안을 로컬 프로젝트 파일로 연결하되, 그 제안을 절대 바로 신뢰하지 않고 로컬 검증 서버와 인간 승인 단계를 통과하게 만드는 안전한 파일 기반 협업 서비스다.
 
 짧게 말하면:
 
 ```text
 웹 LLM은 제안하고, 로컬 APOS는 검증하며, 인간이 승인한다.
 ```
+
+## Earlier Stabilized Baseline (v0.1)
+
+아래 흐름은 earlier stabilized baseline을 설명하는 요약이며, 현재 canonical line은 v0.3과 committed post-v0.3 runtime/bridge work를 기준으로 본다.
+
+```text
+Context Pack / Prompt Builder
+- `--mode auto`는 failure cause를 보고 patch / plan / review 중 하나를 추천하지만, 웹 LLM으로 자동 전송하지 않는다.
+→ task envelope 또는 apos-patch proposal
+→ APOS Core validation and execution
+→ Recorder / approval_items / result_envelope / report_builder
+→ CLI / dashboard / reports
+```
+
+핵심 컴포넌트는 다음과 같다.
+
+- `apos_core.context_pack`: 안전한 작업 맥락 생성
+- `apos_core.prompt_builder`: patch/plan/review 프롬프트 생성
+- `apos_core.plan_flow`: plan_only step 상태 관리
+- `apos_core.report_builder`: failure / drift analysis와 next-prompt 생성
+- `apos_core.recorder`: task, result, approval item 기록
+- `server/list_approvals_endpoint.py`: approval queue, plan, dashboard JSON과 UI 제공
+- `server/apos_server.py`: apos-patch proposal 검증과 commit_patch 처리
+
+## 대표 사용 흐름
+
+APOS에서 처음 소개할 때는 아래 세 흐름을 함께 보여주면 된다.
+
+1. `examples/validate_only_demo.json`을 `cli/run_task.py --validate-only --json`으로 검증한다.
+2. `examples/preview_patch_demo.json`을 `cli/run_task.py --json`으로 미리보기한다.
+3. `examples/apos_patch_demo.md`의 `apos-patch` 코드블록을 브라우저 확장과 `server/apos_server.py`로 받아서 `validation_passed` 후 `commit_patch`로 반영한다.
+
+task envelope 경로는 `workspace/.apos/history.sqlite3`에 result envelope를 남기고, Bridge 경로는 검증된 패치를 `commit_patch`로 실제 파일에 쓴다.
 
 ## 왜 필요한가
 
@@ -36,7 +73,7 @@ Local WebSocket Server가 경로/해시/문법/보호 영역 검증
 
 ## 이 서비스가 하는 일
 
-APOS v3.2 + Bridge Protocol은 크게 네 가지 일을 한다.
+현재 APOS service structure는 크게 네 가지 일을 한다.
 
 1. 프로젝트에 APOS 정적 구조를 만든다.
 2. 프로젝트의 관찰 가능한 기술 사실을 수집하고 Drift Report를 남긴다.
@@ -95,17 +132,43 @@ apos-orchestrator/
 파일:
 
 ```text
+cli/run_task.py
+cli/plan_approve.py
+cli/approvals.py
+cli/list_approvals.py
 cli/apos.py
 ```
 
 역할:
 
+- `cli/run_task.py`: validate-only, preview_patch, patch_and_run, restore_file 작업 실행 및 result envelope 기록
+- `cli/plan_approve.py`: 기록된 plan_only step 승인 후 실행
+- `cli/approvals.py`: pending approval 큐의 list/show/approve/reject 관리
+- `cli/list_approvals.py`: legacy task_id 기준 승인 이벤트 조회
 - 실제 프로젝트에 APOS 기본 폴더 생성
 - `.apos/`, `.codex/`, `specifications/`, `context/`, `workspace/`, `archives/` 생성
 - `specifications/architecture.md`에 Human Notes와 Machine Facts 분리 구조 생성
 - refresh 시 보호 문서를 직접 수정하지 않고 `workspace/scratchpad.md`에 Drift Report 작성
 - Codex에게 넘길 APOS STRICT MODE 문장 출력
-- Bridge Protocol용 `.codex/APOS_INSTRUCTIONS.md` 생성
+- browser-local bridge protocol layer용 `.codex/APOS_INSTRUCTIONS.md` 생성
+- Context Pack JSON/Markdown 생성 및 `apos context build|inspect` 실행
+
+### Plan Step Flow
+
+Plan step 관리는 APOS가 웹 LLM의 계획을 안전한 작은 실행 단위로 나누는 지점이다. `PlanStepManager`가 상태 전이를 담당하고, 사용자는 `cli/apos.py plans ...`를 통해 표준적으로 접근한다.
+
+흐름:
+
+1. `plan_only` envelope를 생성하고 history DB에 기록한다.
+2. `cli/apos.py plans list|show|steps`로 상태를 확인한다.
+3. `approve-step` 또는 `reject-step`으로 step 상태를 바꾼다.
+4. `run-step`으로 승인된 step을 실행하고 `result_envelope`를 받는다.
+5. `executed`와 `failed` step은 기본 재실행이 막히며 `--force`가 필요하다.
+
+호환용 래퍼:
+
+- `cli/plan_step.py`: 파일 기반 plan_only step 단독 실행
+- `cli/plan_approve.py`: 기록된 plan_only step 승인 후 실행
 
 주요 명령:
 
@@ -114,6 +177,94 @@ python cli/apos.py apply -y <project_path>
 python cli/apos.py refresh <project_path>
 python cli/apos.py summarize <project_path>
 python cli/apos.py codex
+python cli/apos.py context build --json
+python cli/apos.py context inspect --format markdown
+python cli/context_pack.py --json
+```
+
+### Context Pack
+
+Context Pack은 웹 LLM에게 제공할 안전한 작업 맥락을 만든다.
+
+역할:
+
+- 허용된 루트와 보호 경로를 분리해 보여준다
+- `.env`, secret/token/key/password 유사 값과 큰 파일 본문을 제외하거나 마스킹한다
+- `project_updates/WORKLOG.md`, 최근 결과 기록, 승인 큐 요약을 작게 요약한다
+- Markdown 출력은 ChatGPT/Gemini에 바로 붙여넣을 수 있게 구성한다
+
+주요 명령:
+
+```bash
+python cli/apos.py context build --json
+python cli/apos.py context inspect --format markdown --output context_pack.md
+```
+
+### Prompt Builder
+
+Prompt Builder는 Context Pack과 사용자 목표를 합쳐 웹 LLM에 바로 붙여넣는 프롬프트를 만든다.
+
+역할:
+
+- 현재 Context Pack을 안전하게 재사용한다
+- patch, plan, review 모드별 출력 계약을 명시한다
+- 웹 LLM이 로컬 파일을 직접 수정하지 못하도록 안전 규칙을 함께 전달한다
+
+주요 명령:
+
+```bash
+python cli/apos.py prompt build --goal "작업 목표" --mode patch --output prompt.md
+python cli/apos.py prompt build --goal "작업 목표" --mode plan
+python cli/apos.py prompt build --goal "작업 목표" --mode review
+```
+
+### Failure / Drift Report
+
+Failure / Drift Report는 Recorder와 Context Pack을 함께 읽어서 실패 원인, 오래된 컨텍스트 신호, 다음 행동을 정리한다.
+
+역할:
+
+- 최근 실패 결과와 승인 거부를 모아 cause summary를 만든다
+- file mtime, old pending approval, recent failure hotspot으로 drift warning을 계산한다
+- `report failures|failure|drift|next-prompt` CLI와 `/api/dashboard` payload를 같은 코어 로직으로 맞춘다
+- 대시보드에는 최근 failed approval item과 drift warning banner를 보여준다
+
+주요 명령:
+
+```bash
+python cli/apos.py report failures --workspace /path/to/workspace --format markdown
+python cli/apos.py report drift --workspace /path/to/workspace --format markdown
+python cli/apos.py report next-prompt --workspace /path/to/workspace
+```
+
+### Dashboard Recovery UX
+
+대시보드는 `report_builder`와 `recovery_prompt_builder`를 재사용해 failed item 요약, drift banner, recovery prompt preview/copy를 보여준다.
+
+표시 항목:
+
+- failed item count와 recent failed item cards
+- failure summary, likely cause, affected files, stdout/stderr/exit_code
+- recommended human action과 recovery prompt textarea
+- drift warning banner와 recovery guidance
+
+### Recovery Prompt Loop
+
+Recovery Prompt Loop is a read-only helper on top of the report builder and prompt builder.
+
+역할:
+
+- `report_builder`가 failure / drift signal을 수집한다
+- `prompt_builder`가 patch / plan / review 출력 계약과 안전 문구를 재사용한다
+- `recover prompt`가 사용자가 다시 웹 LLM에 붙여넣을 Markdown recovery prompt를 만든다
+- automatic execute, approve, or web sending은 하지 않는다
+
+주요 명령:
+
+```bash
+python cli/apos.py recover prompt --latest --workspace /path/to/workspace --output recovery_prompt.md --copy
+python cli/apos.py recover prompt --failure patch-failure --workspace /path/to/workspace
+python cli/apos.py recover prompt --drift --workspace /path/to/workspace
 ```
 
 ### Local WebSocket Server
@@ -122,11 +273,15 @@ python cli/apos.py codex
 
 ```text
 server/apos_server.py
+server/approve_endpoint.py
+server/list_approvals_endpoint.py
 ```
 
 역할:
 
-- `ws://127.0.0.1:8765`에서 로컬 WebSocket 서버 실행
+- `server/apos_server.py`: `ws://127.0.0.1:8765`에서 `apos-patch`를 검증하고 commit_patch를 기다림
+- `server/approve_endpoint.py`: approval queue item의 approve/reject와 plan_only step 실행을 처리하는 HTTP 엔드포인트
+- `server/list_approvals_endpoint.py`: approval queue item의 목록/상세 조회 HTTP 엔드포인트
 - localhost 연결만 허용
 - `propose_patch`, `commit_patch`, `ping` 처리
 - `target` 경로 보안 검사
@@ -136,6 +291,25 @@ server/apos_server.py
 - 검증 통과 패치를 pending buffer에 저장
 - `commit_patch`가 들어와야 실제 파일 쓰기
 - 보호 영역 요청은 `workspace/scratchpad.md`로 리다이렉트
+
+### Local Dashboard
+
+파일:
+
+```text
+server/list_approvals_endpoint.py
+server/approvals_ui.html
+```
+
+역할:
+
+- `server/list_approvals_endpoint.py`: 승인 큐, plan 목록, 대시보드 요약, approve/reject/run JSON API와 HTML UI를 함께 제공
+- `server/approvals_ui.html`: 로컬 브라우저에서 여는 최소 조회 UI
+- `GET /`, `GET /ui`, `GET /ui/approvals`, `GET /ui/plans`: 대시보드 진입점
+- `GET /api/dashboard`: pending / failed / recent executed / recent plans 요약
+- `GET /api/approvals`, `GET /api/plans`: 승인 큐와 plan 상태 조회
+- `POST /api/approvals/approve`, `POST /api/approvals/reject`, `POST /api/plans/approve-step`, `POST /api/plans/reject-step`, `POST /api/plans/run-step`: 최소 승인/거절/실행 액션
+- UI는 DB를 직접 수정하지 않고, 모든 액션을 Orchestrator와 PlanStepManager 정책으로 통과시킨다
 
 ### Chrome Extension
 
@@ -179,12 +353,18 @@ https://gemini.google.com/*
 파일:
 
 ```text
+examples/validate_only_demo.json
+examples/preview_patch_demo.json
+examples/apos_patch_demo.md
 examples/valid_patch_example.md
 examples/invalid_patch_example.md
 ```
 
 역할:
 
+- `validate_only_demo.json`: task envelope 검증 전용 예제
+- `preview_patch_demo.json`: patch preview 예제
+- `apos_patch_demo.md`: 웹 LLM `apos-patch` 승인/실행 예제
 - 정상 패치 예시
 - Python 문법 오류 실패 예시
 - 확장 프로그램과 서버를 수동 테스트할 때 사용
@@ -431,7 +611,7 @@ CLI는 프로젝트의 기술적 사실을 관찰한다.
 
 구현된 것:
 
-- APOS v3.2 프로젝트 구조
+- APOS current project structure
 - Pure Shell CLI
 - Local WebSocket validation server
 - Manifest v3 Chrome extension
@@ -470,7 +650,7 @@ CLI는 프로젝트의 기술적 사실을 관찰한다.
 
 ## 결론
 
-APOS v3.2 + Bridge Protocol은 웹 LLM을 로컬 프로젝트에 연결하는 자동화 도구가 아니라, 신뢰할 수 없는 웹 출력을 검증 가능한 로컬 패치 제안으로 바꾸는 안전 계층이다.
+APOS의 bridge/browser-local integration layer는 웹 LLM을 로컬 프로젝트에 연결하는 자동화 도구가 아니라, 신뢰할 수 없는 웹 출력을 검증 가능한 로컬 패치 제안으로 바꾸는 안전 계층이다.
 
 현재 구현은 다음 최소 제품 기준을 만족한다.
 

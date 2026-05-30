@@ -1,10 +1,41 @@
-# APOS v3.2 + Bridge Protocol Usage
+# APOS Usage Guide
+
+This guide describes the current APOS usage baseline for the v0.3 release line plus the runtime and bridge capabilities already committed after v0.3.
 
 APOS connects web LLM output to a local project through a local validation gate.
 
-The Bridge Protocol keeps design-oriented AI output separated from execution-oriented patch instructions.
+The Bridge Protocol section in this guide refers to the browser-local integration path, not the product version name.
 
 It does not give the web LLM direct write access. The web LLM proposes, the local server validates, and a human-approved `commit_patch` writes the file.
+
+## Recommended Work Order
+
+For the earlier minimal stabilized flow, use this order:
+
+1. Start the local server or dashboard server.
+2. Build a Context Pack.
+3. Build a prompt with Prompt Builder.
+4. Collect the web LLM response as a task envelope or `apos-patch` proposal.
+5. Check the approval queue.
+6. Use plan steps when the work is `plan_only`.
+7. Open the dashboard to inspect queue state, plans, and recent failures.
+8. Use Failure / Drift Report when the workspace looks stale or a task fails.
+
+## Standard Demo Flow
+
+Use these three examples when you want to show the normal APOS path end to end.
+
+```text
+1. examples/validate_only_demo.json
+  -> cli/run_task.py --validate-only --json
+2. examples/preview_patch_demo.json
+  -> cli/run_task.py --json
+3. examples/apos_patch_demo.md
+  -> server/apos_server.py -> validation_passed -> commit_patch
+```
+
+The first two examples produce or preview a `result_envelope` through `cli/run_task.py`.
+The third example demonstrates the browser bridge path for `apos-patch` code blocks.
 
 ## Install
 
@@ -116,7 +147,9 @@ def main():
 
 The extension reads `pre code` blocks, finds `apos-patch`, pairs it with the immediately following code block, computes SHA-256, and sends a `propose_patch` message.
 
-If `sha256` is empty or a placeholder such as `...`, the extension fills the computed hash. If a real hash is supplied and mismatches the source block, the extension requests a correction.
+The extension only accepts assistant/model-authored message scopes, ignores user-authored or editable composer blocks, deduplicates proposals by `patch_id + sha256`, and keeps retry state bounded.
+
+If `sha256` is empty or a placeholder such as `...`, the extension fills the computed hash. If a real hash is supplied and mismatches the source block, the extension requests a correction. Automatic retry prompts are capped and the queue is pruned so stale entries do not grow without bound.
 
 ## Commit Flow
 
@@ -149,70 +182,130 @@ If you use the extension content script directly, you can send commit requests f
 window.__APOS_V32__.commit("patch-001");
 ```
 
-## Execute a Single Plan Step (Plan Only Mode)
+## Plan Only Mode and `apos plans`
 
-When you have a `plan_only` task envelope and want to run a single step from the plan, use the `plan_step` CLI.
+`plan_only` tasks are the standard way to move through a plan one step at a time.
 
-This command constructs a standalone task for the selected step, applies patches synchronously (using the same patch policy checks), runs the first command in the step if present, and records a `result_envelope` to the workspace history DB.
+Start by recording a `plan_only` envelope into the workspace history DB. The example below uses the existing demo payload:
 
-Example (run step 0 and print JSON result):
-
-```bash
-python cli/plan_step.py /path/to/plan.json --step 0 --json
-```
-
-Notes:
-
-- The CLI will validate the `plan_only` envelope before executing the step.
-- Patch validation and command policy are enforced the same way as normal tasks.
-- The command runs synchronously and writes a minimal `result_envelope` to `workspace/.apos/history.sqlite3`.
-- Use this for manual approval or debugging of individual plan steps before wiring up automated loops.
-
-## Approve and Execute a Recorded Plan Step
-
-If a `plan_only` envelope has been recorded to the workspace history DB (for example, by a server or by calling `orch.recorder.record_task(...)`), you can approve and execute a specific step using the `plan_approve` CLI. This looks up the recorded task by `task_id`, validates the plan, applies patches and runs the first command of the step synchronously, and records a `result_envelope` into the same history DB.
-
-Example (approve step 0 for recorded task `plan-123` in workspace `/path/to/project`):
-
-```bash
-python cli/plan_approve.py plan-123 --workspace /path/to/project --step 0 --approved-by alice --json
-```
-
-Quick way to record a plan task into history for a local demo (runs in the workspace root where `plan.json` exists):
-
-```bash
-# record the plan.json payload into the workspace history DB
-python - <<'PY'
+```powershell
+@'
 import json
 from apos_core.orchestrator import Orchestrator
-payload = json.load(open('examples/plan_approve_demo_plan.json','r',encoding='utf-8'))
-workspace = payload.get('workspace_root')
+with open('examples/plan_approve_demo_plan.json', 'r', encoding='utf-8') as handle:
+    payload = json.load(handle)
+
+workspace = payload['workspace_root']
 orch = Orchestrator(workspace_root=workspace, history_db_path=f"{workspace}/.apos/history.sqlite3")
 orch.recorder.record_task(payload['task_id'], payload)
 print('recorded', payload['task_id'])
-PY
+'@ | .\.venv\Scripts\python.exe -
+```
 
-Then run the `plan_approve` command with the printed task id.
+Then use the canonical CLI:
 
-Listing Approvals
+```bash
+python cli/apos.py plans list --workspace /path/to/project --json
+python cli/apos.py plans show plan-123 --workspace /path/to/project --json
+python cli/apos.py plans steps plan-123 --workspace /path/to/project --json
+python cli/apos.py plans approve-step plan-123 0 --workspace /path/to/project --approved-by alice --json
+python cli/apos.py plans reject-step plan-123 1 --workspace /path/to/project --rejected-by bob --reason "not needed" --json
+python cli/apos.py plans run-step plan-123 0 --workspace /path/to/project --approved-by alice --json
+```
+
+What the commands do:
+
+- `plans list` shows recorded `plan_only` tasks.
+- `plans show` shows one plan with step statuses and summary metadata.
+- `plans steps` returns the step list for a plan.
+- `approve-step` moves one step to approved.
+- `reject-step` moves one step to rejected.
+- `run-step` executes an approved step and returns a result envelope.
+
+Execution result:
+
+- `success` means the step ran successfully.
+- `failed` means a command or patch failed during execution.
+- `skipped` means the step was not runnable under the current state.
+
+Rerun policy:
+
+- `pending` and `rejected` steps do not execute; `run-step` returns `skipped`.
+- `executed` and `failed` steps do not rerun unless you pass `--force`.
+- Invalid `task_id` or invalid step index values cause the CLI to fail.
+
+Compatibility wrappers remain available:
+
+- `cli/plan_step.py` runs a single step from a file-based `plan_only` envelope.
+- `cli/plan_approve.py` approves and runs a recorded plan step from history.
+
+The documented flow is backed by [tests/test_plan_management.py](../tests/test_plan_management.py).
+
+For a copy-paste walkthrough, see [examples/plan_step_demo.md](../examples/plan_step_demo.md).
+
+If you need the generic approval queue surface, keep using `cli/approvals.py`; it manages approval items, not plan step lifecycle directly.
+
+## Local Dashboard
+
+The lightweight browser dashboard runs on the approval-list server and reads the same workspace history DB.
+
+```bash
+python server/list_approvals_endpoint.py
+```
+
+Open one of these routes in a browser:
+
+```text
+http://127.0.0.1:8082/
+http://127.0.0.1:8082/ui
+http://127.0.0.1:8082/ui/approvals
+http://127.0.0.1:8082/ui/plans
+```
+
+Use the workspace field in the header to point the dashboard at the project you want to inspect. If `APOS_APPROVE_TOKEN` is set, paste the token into the dashboard token field before refreshing.
+
+The dashboard exposes these same-origin endpoints for read and action flows:
+
+- `GET /api/dashboard`
+- `GET /api/approvals`
+- `GET /api/plans`
+- `POST /api/approvals/approve`
+- `POST /api/approvals/reject`
+- `POST /api/plans/approve-step`
+- `POST /api/plans/reject-step`
+- `POST /api/plans/run-step`
+
+The browser actions still route through `Orchestrator` and `PlanStepManager` policy checks; the UI does not modify SQLite directly.
+
+For a step-by-step browser walkthrough, see [examples/ui_demo.md](../examples/ui_demo.md) and [docs/UI_OVERVIEW.md](UI_OVERVIEW.md).
+
+Approval Queue
+--------------
+
+You can inspect and manage pending approval items with the CLI:
+
+```bash
+python cli/approvals.py list --workspace /path/to/workspace --status pending
+python cli/approvals.py show <item_id> --workspace /path/to/workspace
+python cli/approvals.py approve <item_id> --workspace /path/to/workspace --approved-by alice
+python cli/approvals.py reject <item_id> --workspace /path/to/workspace --rejected-by bob
+```
+
+This queue includes recorded `plan_only` steps and bridge patch proposals when they are persisted.
+
+HTTP Approval API
 -----------------
 
-You can list recorded approvals for a task using the CLI:
-
-```
-python -m cli.list_approvals TASK_ID --workspace /path/to/workspace
-```
-
-This prints a JSON array of approval events recorded in the workspace history DB.
-HTTP Approve Endpoint
-
-You can also run a lightweight HTTP endpoint that exposes an approve API. Start it with:
+You can also run lightweight HTTP endpoints that expose the approval queue API. Start them with:
 
 ```bash
 python server/approve_endpoint.py
+python server/list_approvals_endpoint.py
 ```
 
-Then POST JSON to `http://127.0.0.1:8081/approve` with keys: `task_id`, `workspace`, `step`, `approved_by` (optional). Example using `curl`:
+Then POST JSON to `http://127.0.0.1:8081/approve` to approve or execute an item, or `http://127.0.0.1:8081/reject` to reject it. You can also query `http://127.0.0.1:8082/approvals` to list queue items and `http://127.0.0.1:8082/approvals?id=<item_id>` to show one item.
+
+Example using `curl` to execute a recorded plan step:
 
 ```bash
 curl -X POST http://127.0.0.1:8081/approve \
@@ -220,7 +313,98 @@ curl -X POST http://127.0.0.1:8081/approve \
   -d '{"task_id":"plan-approve-demo","workspace":"./workspace","step":0,"approved_by":"alice"}'
 ```
 
-The endpoint returns the `result_envelope` JSON on success.
+Example using `curl` to reject a queue item:
+
+```bash
+curl -X POST http://127.0.0.1:8081/reject \
+  -H 'Content-Type: application/json' \
+  -d '{"workspace":"./workspace","item_id":"approval-item-id","rejected_by":"bob","reason":"not needed"}'
+```
+
+`POST /approve` returns a `result_envelope` for recorded `plan_only` steps and an approval item object for queue-only approvals. `POST /reject` returns the updated approval item.
+
+Context Pack
+------------
+
+Use the Context Pack when you want to give ChatGPT or Gemini a safe summary of the current workspace instead of raw files.
+
+```bash
+python cli/apos.py context build --json
+python cli/apos.py context inspect --format markdown --output context_pack.md
+python cli/context_pack.py --json
+```
+
+The JSON output is machine-oriented. The Markdown output is paste-friendly and includes Project Snapshot, Current Safe Working Scope, Recent Changes, Approval Queue Summary, Relevant Files, Known Warnings, and Recommended Next Prompt.
+
+See [examples/context_pack_demo.md](examples/context_pack_demo.md) for a paste-ready Markdown example.
+
+Context Pack excludes protected paths, large-file bodies, and secret-like values.
+
+## Prompt Builder
+
+Prompt Builder는 현재 Context Pack, 사용자 목표, APOS 출력 규칙을 합쳐 ChatGPT 또는 Gemini에 바로 붙여넣을 수 있는 마크다운 프롬프트를 만든다.
+
+프롬프트는 항상 "웹 LLM은 제안자이고 APOS는 검증/실행자"라는 역할 분리를 먼저 강조하고, 사람용 요약과 APOS용 구조화 블록을 분리하도록 요구한다.
+
+주요 모드:
+
+- `patch`: 단일 `apos-patch` 제안용
+- `plan`: `plan_only` 계획용
+- `review`: 변경 없이 분석/리스크/다음 작업 제안용
+
+patch 모드는 정확히 하나의 `apos-patch` 코드블록과 하나의 source 블록을 요구한다. plan 모드는 독립적으로 승인 가능한 step 분리를 요구하고, review 모드는 파일 수정 JSON을 만들지 않는다.
+
+주요 명령:
+
+```bash
+python cli/apos.py prompt build --goal "작업 목표" --mode patch --output prompt.md
+python cli/apos.py prompt build --goal "작업 목표" --mode plan
+python cli/apos.py prompt build --goal "작업 목표" --mode review --copy
+```
+
+`--copy`는 가능하면 클립보드로도 복사하지만, 실패해도 프롬프트 생성 자체는 계속 성공하도록 설계되어 있다.
+
+예시 워크스루는 [examples/prompt_builder_demo.md](../examples/prompt_builder_demo.md)를 보면 된다.
+
+## Failure / Drift Report
+
+Failure / Drift Report는 실패한 task와 오래된 컨텍스트 신호를 함께 묶어 다음 행동을 안내한다.
+
+주요 명령:
+
+```bash
+python cli/apos.py report failures --workspace /path/to/workspace --format markdown
+python cli/apos.py report failure task-id --workspace /path/to/workspace --format markdown
+python cli/apos.py report drift --workspace /path/to/workspace --format markdown
+python cli/apos.py report next-prompt --workspace /path/to/workspace
+```
+
+이 보고서는 recent failure, approval rejection, affected files, drift warning, recommended human action, recommended LLM prompt를 함께 반환한다.
+Failed item cards now include failure summary, likely cause, affected files, and a recovery prompt preview that can be copied manually or from the copy button in the dashboard detail panel.
+The failed-item card also points you to the detail panel when you want the full recovery prompt text.
+
+## Recovery Prompt Loop
+
+Recovery Prompt Loop는 보고서나 실패 항목을 바탕으로 웹 LLM에 다시 붙여넣을 복구용 마크다운 프롬프트를 만든다.
+
+주요 명령:
+
+```bash
+python cli/apos.py recover prompt --latest --workspace /path/to/workspace --output recovery_prompt.md --copy
+python cli/apos.py recover prompt --failure patch-failure --workspace /path/to/workspace
+python cli/apos.py recover prompt --drift --workspace /path/to/workspace
+python cli/apos.py recover prompt --plan-step plan-recover-demo 0 --workspace /path/to/workspace
+python cli/apos.py recover prompt --failure patch-failure --mode auto --workspace /path/to/workspace
+```
+
+동작 규칙:
+
+- 자동 approve 또는 execute를 하지 않는다.
+- `--mode auto`는 failure cause를 보고 patch / plan / review 중 하나를 추천할 뿐이며, 전송이나 실행을 수행하지 않는다.
+- 복구 프롬프트는 항상 사람이 복사해 검토할 수 있는 Markdown이어야 한다.
+- command 실패는 plan 모드를 우선 추천하고, 단일 파일 patch 실패는 patch 모드를 추천할 수 있다.
+- 원인이 불분명하면 review 모드를 추천한다.
+- `--mode patch|plan|review`로 추천 모드를 명시적으로 override할 수 있다.
 
 Authentication (optional):
 
