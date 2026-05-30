@@ -20,7 +20,7 @@ The web LLM only produces JSON. APOS performs validation, policy checks, executi
 
 ## Standard Demo Flow
 
-APOS currently has two stable demo paths.
+APOS currently has one stable core demo path and one post-v0.3 candidate browser-local integration path.
 
 ### 1. Task Envelope Flow
 
@@ -35,7 +35,7 @@ web LLM output JSON task envelope
 
 ### 2. apos-patch Bridge Flow
 
-Use this for the browser extension path.
+Use this for the browser extension path when you want the post-v0.3 bridge/dashboard subsystem rather than the stable core baseline.
 
 ```text
 web LLM emits apos-patch + source code blocks
@@ -99,7 +99,7 @@ See [examples/recovery_prompt_demo.md](examples/recovery_prompt_demo.md) for a s
 
 ## Known Limitations
 
-APOS v0.1 is intentionally bounded. See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the current limits, including the lack of direct automatic message forwarding to the web LLM, the absence of external browser automation and automatic loops, the need for manual approval queue review, and the fact that DOM-driven bridge flows can drift.
+The current APOS baseline is v0.3, and this branch carries a post-v0.3 consolidated candidate on top of that baseline. See [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) for the current limits, candidate boundaries, and experimental bridge/dashboard notes. Older v0.1/v0.2/v0.2.1 materials are preserved in the historical release snapshots linked below.
 
 APOS currently targets `websockets` 16.x and the modern `websockets.asyncio` server API. The local bridge server uses `websockets.asyncio.server.ServerConnection` and `serve`, so older legacy-only releases are not the supported baseline.
 
@@ -513,11 +513,11 @@ The history DB is runtime state, not source code.
 
 ---
 
-## Legacy Bridge Protocol
+## Legacy and Experimental Bridge Notes
 
-APOS also contains an earlier Bridge Protocol flow using a browser extension and local WebSocket server.
+APOS also contains earlier bridge notes and the current post-v0.3 experimental browser-local integration path that uses a browser extension and local WebSocket server.
 
-Legacy flow:
+Historical / experimental flow:
 
 ```text
 Web LLM output
