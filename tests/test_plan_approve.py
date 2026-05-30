@@ -49,8 +49,10 @@ def test_execute_plan_step_records_result_and_writes_file():
 
         # record the plan task as if submitted earlier
         orch.recorder.record_task(task_id, payload)
+        approved = orch.approve_plan_step(task_id, 0, approved_by="tester")
+        assert approved is not None
 
-        res = orch.execute_plan_step(task_id, 0, approved_by="tester")
+        res = orch.run_plan_step(task_id, 0, approved_by="tester")
 
         assert res.get("status") == "success"
         # check result recorded in DB by fetching latest results

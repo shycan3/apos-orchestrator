@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "task_id": "demo-preview-patch",
+  "task_type": "preview_patch",
+  "created_by": "web_llm",
+  "workspace_root": "C:/Users/DO/Documents/apos-orchestrator",
+  "patches": [
+    {
+      "target": "workspace/preview_patch_demo.py",
+      "language": "python",
+      "content": "def main():\n    print('preview patch demo')\n\n\nif __name__ == '__main__':\n    main()\n",
+      "intent": "create",
+      "description": "Preview a tiny demo file"
+    }
+  ],
+  "commands": [],
+  "options": {
+    "enable_snapshots": false,
+    "enable_patch_dry_run": true,
+    "enable_command_policy": true,
+    "fail_on_snapshot_error": true,
+    "stop_on_first_failure": true
+  },
+  "meta": {
+    "source": "docs",
+    "demo": "preview_patch"
+  }
+}

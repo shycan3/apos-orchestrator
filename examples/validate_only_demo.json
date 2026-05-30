@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "task_id": "demo-validate-only",
+  "task_type": "patch_and_run",
+  "created_by": "web_llm",
+  "workspace_root": "C:/Users/DO/Documents/apos-orchestrator",
+  "patches": [
+    {
+      "target": "workspace/validate_only_demo.py",
+      "language": "python",
+      "content": "def main():\n    print('validate-only demo')\n\n\nif __name__ == '__main__':\n    main()\n",
+      "intent": "create",
+      "description": "Create a tiny demo file"
+    }
+  ],
+  "commands": [
+    {
+      "command": ["python", "workspace/validate_only_demo.py"],
+      "description": "Run demo script after validation",
+      "expected_result": "prints demo text",
+      "timeout_seconds": 10
+    }
+  ],
+  "options": {
+    "enable_snapshots": false,
+    "enable_patch_dry_run": true,
+    "enable_command_policy": true,
+    "fail_on_snapshot_error": true,
+    "stop_on_first_failure": true
+  },
+  "meta": {
+    "source": "docs",
+    "demo": "validate_only"
+  }
+}
